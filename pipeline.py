@@ -68,13 +68,15 @@ class BatchPipeline:
         total = len(images)
 
         def _analyze_one(idx: int, name: str, img: Image.Image):
+            logger.info("开始分析 [%d/%d]: %s", idx + 1, total, Path(name).name)
             try:
                 result = self._bridge.analyze(img, context, backend)
+                logger.info("分析完成 [%d/%d]: %s (后端: %s)", idx + 1, total, Path(name).name, result.backend)
                 if on_progress:
                     on_progress(idx + 1, total, name)
                 return idx, result
             except Exception as e:
-                logger.error("分析 %s 失败: %s", name, e)
+                logger.error("分析失败 [%d/%d]: %s - %s", idx + 1, total, Path(name).name, e)
                 return idx, EditSuggestion(analysis=f"分析失败: {e}", backend="error")
 
         with ThreadPoolExecutor(max_workers=cfg.max_concurrent) as pool:
