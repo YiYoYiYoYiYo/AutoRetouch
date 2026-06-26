@@ -1,5 +1,7 @@
 """AI Beautify - Gradio 用户界面"""
 
+import base64
+import io
 import json
 import logging
 import tempfile
@@ -7,6 +9,7 @@ import time
 from pathlib import Path
 
 import gradio as gr
+from PIL import Image as PILImage
 
 from config import cfg
 from pipeline import BatchPipeline, load_images
@@ -18,28 +21,19 @@ logger = logging.getLogger(__name__)
 pipeline = BatchPipeline()
 
 
-# ── 日志收集器 ──────────────────────────────────────
+# ── 工具函数 ──────────────────────────────────────
 
-class StepLogger:
-    def __init__(self):
-        self.logs: list[str] = []
-        self._step_start: float = 0
+def img_to_base64(img: PILImage.Image, max_w=1200) -> str:
+    """PIL Image → base64 data URL，限制最大宽度"""
+    w, h = img.size
+    if w > max_w:
+        ratio = max_w / w
+        img = img.resize((max_w, int(h * ratio)), PILImage.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/jpeg;base64,{b64}"
 
-    def step(self, msg: str):
-        now = time.time()
-        elapsed = f" ({now - self._step_start:.1f}s)" if self._step_start else ""
-        ts = time.strftime("%H:%M:%S")
-        self.logs.append(f"[{ts}] {msg}{elapsed}")
-        self._step_start = now
-
-    def to_html(self) -> str:
-        if not self.logs:
-            return "<div class='log-empty'>等待操作...</div>"
-        lines = self.logs[-20:]
-        return "<br>".join(lines)
-
-
-# ── 格式化 ──────────────────────────────────────────
 
 def format_suggestion(s: EditSuggestion) -> str:
     gp = s.global_params
@@ -85,129 +79,244 @@ def format_suggestion_json(s: EditSuggestion) -> str:
     }, ensure_ascii=False, indent=2)
 
 
+def build_slider_html(original_b64: str, processed_b64: str) -> str:
+    """构建滑动对比 HTML"""
+    return f"""
+    <div id="slider-container" style="position:relative;width:100%;max-width:900px;overflow:hidden;border-radius:8px;cursor:col-resize;user-select:none;">
+        <img src="{processed_b64}" style="width:100%;display:block;" />
+        <div id="slider-clip" style="position:absolute;top:0;left:0;width:50%;height:100%;overflow:hidden;">
+            <img src="{original_b64}" style="width:900px;max-width:none;display:block;" />
+        </div>
+        <div id="slider-handle" style="position:absolute;top:0;left:50%;width:3px;height:100%;background:#fff;box-shadow:0 0 8px rgba(0,0,0,0.5);transform:translateX(-50%);pointer-events:none;">
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.7);color:#fff;padding:6px 10px;border-radius:20px;font-size:12px;white-space:nowrap;pointer-events:none;">
+                ◀ 原图 | 处理后 ▶
+            </div>
+        </div>
+    </div>
+    <script>
+    (function() {{
+        const container = document.getElementById('slider-container');
+        const clip = document.getElementById('slider-clip');
+        const handle = document.getElementById('slider-handle');
+        const clipImg = clip.querySelector('img');
+        if (!container || !clip || !handle) return;
+
+        function setPosition(clientX) {{
+            const rect = container.getBoundingClientRect();
+            let pct = ((clientX - rect.left) / rect.width) * 100;
+            pct = Math.max(0, Math.min(100, pct));
+            clip.style.width = pct + '%';
+            handle.style.left = pct + '%';
+            // clip 内的图片宽度 = 容器实际宽度
+            clipImg.style.width = rect.width + 'px';
+        }}
+
+        // 初始化：图片加载后设置 clip 图片宽度
+        const mainImg = container.querySelector(':scope > img');
+        if (mainImg.complete) {{
+            clipImg.style.width = container.offsetWidth + 'px';
+        }} else {{
+            mainImg.onload = () => {{ clipImg.style.width = container.offsetWidth + 'px'; }};
+        }}
+
+        let dragging = false;
+        container.addEventListener('mousedown', (e) => {{ dragging = true; setPosition(e.clientX); }});
+        document.addEventListener('mousemove', (e) => {{ if (dragging) setPosition(e.clientX); }});
+        document.addEventListener('mouseup', () => {{ dragging = false; }});
+        container.addEventListener('touchstart', (e) => {{ dragging = true; setPosition(e.touches[0].clientX); }});
+        container.addEventListener('touchmove', (e) => {{ if (dragging) {{ e.preventDefault(); setPosition(e.touches[0].clientX); }} }});
+        container.addEventListener('touchend', () => {{ dragging = false; }});
+
+        window.addEventListener('resize', () => {{ clipImg.style.width = container.offsetWidth + 'px'; }});
+    }})();
+    </script>
+    """
+
+
+def make_log_html(logs: list[str]) -> str:
+    """构建日志 HTML"""
+    if not logs:
+        return "<div id='log-panel' style='background:#1a1a2e;color:#e0e0e0;font-family:Consolas,Monospace;font-size:12px;padding:10px 14px;border-radius:8px;max-height:160px;overflow-y:auto;line-height:1.6;'>等待操作...</div>"
+    lines = logs[-30:]
+    content = "<br>".join(lines)
+    return f"<div id='log-panel' style='background:#1a1a2e;color:#e0e0e0;font-family:Consolas,Monospace;font-size:12px;padding:10px 14px;border-radius:8px;max-height:160px;overflow-y:auto;line-height:1.6;'>{content}<script>var p=document.getElementById('log-panel');if(p)p.scrollTop=p.scrollHeight;</script></div>"
+
+
 # ── CSS ──────────────────────────────────────────
 
 CUSTOM_CSS = """
-#log-panel {
-    background: #1a1a2e;
-    color: #e0e0e0;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 12px;
-    padding: 10px 14px;
-    border-radius: 8px;
-    max-height: 160px;
-    overflow-y: auto;
-    margin-top: 8px;
-    line-height: 1.6;
-}
-.log-empty { color: #666; font-style: italic; }
 .status-idle { background: #f3f4f6; color: #6b7280; padding: 8px 12px; border-radius: 6px; }
 .status-loading { background: #dbeafe; color: #2563eb; padding: 8px 12px; border-radius: 6px; animation: pulse 1.5s infinite; }
 .status-done { background: #d1fae5; color: #059669; padding: 8px 12px; border-radius: 6px; }
 .status-error { background: #fee2e2; color: #dc2626; padding: 8px 12px; border-radius: 6px; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+/* 导出图片自适应 */
+.gallery-item img, .gallery-item video { object-fit: contain !important; max-height: 300px !important; }
 """
 
 
-# ── 核心逻辑 ──────────────────────────────────────
+# ── 核心逻辑（逐张处理 + 实时 yield）──────────────
 
 def analyze_images(files, context, backend):
-    log = StepLogger()
-    if not files:
-        log.step("❌ 请先上传照片")
-        return "请上传照片", "", None, [], log.to_html()
+    """逐张分析，实时 yield 进度"""
+    logs = []
+    t0 = time.time()
 
-    log.step(f"📷 加载 {len(files)} 张图片...")
+    def log(msg):
+        elapsed = time.time() - t0
+        logs.append(f"[{elapsed:.1f}s] {msg}")
+
+    empty_slider = "<div style='text-align:center;color:#888;padding:40px;'>分析完成后显示预览</div>"
+
+    if not files:
+        log("❌ 请先上传照片")
+        yield "请上传照片", "", make_log_html(logs), empty_slider, '<div class="status-error">❌ 请先上传照片</div>'
+        return
+
+    log(f"📷 加载 {len(files)} 张图片...")
+    yield "⏳ 加载中...", "", make_log_html(logs), empty_slider, '<div class="status-loading">⏳ 加载图片...</div>'
+
     images = load_images([f.name for f in files])
     if not images:
-        log.step("❌ 图片加载失败")
-        return "图片加载失败", "", None, [], log.to_html()
+        log("❌ 图片加载失败")
+        yield "图片加载失败", "", make_log_html(logs), empty_slider, '<div class="status-error">❌ 图片加载失败</div>'
+        return
 
-    log.step(f"✅ 加载完成，开始 VLM 分析...")
-    suggestions = pipeline.analyze_batch(
-        images, context, backend or None,
-        on_progress=lambda cur, total, name: log.step(f"🧠 分析 [{cur}/{total}]: {Path(name).name}"),
-    )
-    log.step(f"✅ 分析完成，共 {len(suggestions)} 张")
+    log(f"✅ 加载完成 ({len(images)} 张)")
+    suggestions = []
 
-    suggestion = suggestions[0]
-    return (
-        format_suggestion(suggestion),
-        format_suggestion_json(suggestion),
-        images[0][1],
-        [{"name": Path(images[i][0]).name, "image": images[i][1], "suggestion": s} for i, s in enumerate(suggestions)],
-        log.to_html(),
+    for i, (name, img) in enumerate(images):
+        log(f"🧠 分析 [{i+1}/{len(images)}]: {Path(name).name}")
+        yield "⏳ 分析中...", "", make_log_html(logs), empty_slider, f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]...</div>'
+
+        try:
+            suggestion = pipeline._bridge.analyze(img, context, backend or None)
+            suggestions.append(suggestion)
+            log(f"  → 风格: {suggestion.style}")
+        except Exception as e:
+            log(f"  ❌ 分析失败: {e}")
+            suggestions.append(EditSuggestion(analysis=f"分析失败: {e}", backend="error"))
+
+    s = suggestions[0]
+    total_time = time.time() - t0
+    log(f"🎉 全部分析完成! 耗时 {total_time:.1f}s")
+
+    # 用第一张原图生成预览
+    preview_html = f"<div style='text-align:center'><img src='{img_to_base64(images[0][1])}' style='max-width:100%;border-radius:8px;' /></div>"
+
+    yield (
+        format_suggestion(s),
+        format_suggestion_json(s),
+        make_log_html(logs),
+        preview_html,
+        f'<div class="status-done">✅ 分析完成 {len(images)} 张，耗时 {total_time:.1f}s</div>',
     )
 
 
 def process_and_export(files, context, backend, output_format):
-    log = StepLogger()
-    if not files:
-        log.step("❌ 请先上传照片")
-        return [], "请先上传照片", {}, None, None, True, "👁 按住看原图", log.to_html()
+    """逐张处理，实时 yield 进度"""
+    logs = []
+    t0 = time.time()
 
-    log.step(f"📷 加载 {len(files)} 张图片...")
+    def log(msg):
+        elapsed = time.time() - t0
+        logs.append(f"[{elapsed:.1f}s] {msg}")
+
+    empty_slider = "<div style='text-align:center;color:#888;padding:40px;'>处理完成后自动显示对比</div>"
+
+    if not files:
+        log("❌ 请先上传照片")
+        yield [], "请先上传照片", empty_slider, \
+            '<div class="status-error">❌ 请先上传照片</div>', make_log_html(logs)
+        return
+
+    log(f"📷 加载 {len(files)} 张图片...")
+    yield [], "⏳ 加载中...", empty_slider, \
+        '<div class="status-loading">⏳ 加载图片...</div>', make_log_html(logs)
+
     images = load_images([f.name for f in files])
     if not images:
-        log.step("❌ 图片加载失败")
-        return [], "图片加载失败", {}, None, None, True, "👁 按住看原图", log.to_html()
-    log.step(f"✅ 加载完成")
+        log("❌ 图片加载失败")
+        yield [], "图片加载失败", empty_slider, \
+            '<div class="status-error">❌ 图片加载失败</div>', make_log_html(logs)
+        return
+    log(f"✅ 加载完成 ({len(images)} 张)")
 
-    log.step("🧠 开始 VLM 分析...")
-    suggestions = pipeline.analyze_batch(
-        images, context, backend or None,
-        on_progress=lambda cur, total, name: log.step(f"🧠 分析 [{cur}/{total}]: {Path(name).name}"),
-    )
-    log.step(f"✅ VLM 分析完成")
-
-    log.step("🎨 开始图像处理...")
-    batch = pipeline.process_batch(
-        images, suggestions,
-        on_progress=lambda cur, total, name: log.step(f"🎨 处理 [{cur}/{total}]: {Path(name).name}"),
-    )
-    log.step(f"✅ 处理完成: 成功 {batch.success_count}, 失败 {batch.fail_count}")
-
+    # 逐张：VLM 分析 → 图像处理 → 导出
+    results = []
+    export_paths = []
     output_dir = Path(tempfile.mkdtemp(prefix="ai_beautify_"))
-    log.step(f"💾 导出到 {output_dir}...")
-    paths = pipeline.export_batch(
-        batch, output_dir, output_format,
-        on_progress=lambda cur, total, name: log.step(f"💾 导出 [{cur}/{total}]: {Path(name).name}"),
+    first_slider = None
+
+    for i, (name, img) in enumerate(images):
+        # VLM 分析
+        log(f"🧠 分析 [{i+1}/{len(images)}]: {Path(name).name}")
+        yield [], "⏳ 处理中...", empty_slider if first_slider is None else first_slider, \
+            f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]: {Path(name).name}</div>', make_log_html(logs)
+
+        try:
+            suggestion = pipeline._bridge.analyze(img, context, backend or None)
+            log(f"  → 风格: {suggestion.style}")
+        except Exception as e:
+            log(f"  ❌ 分析失败: {e}")
+            suggestion = EditSuggestion(analysis=f"分析失败: {e}", backend="error")
+
+        # 图像处理
+        log(f"🎨 处理 [{i+1}/{len(images)}]: {Path(name).name}")
+        yield [], "⏳ 处理中...", empty_slider if first_slider is None else first_slider, \
+            f'<div class="status-loading">⏳ 处理 [{i+1}/{len(images)}]: {Path(name).name}</div>', make_log_html(logs)
+
+        try:
+            processed = pipeline._processor.process(img, suggestion)
+            log(f"  ✅ 处理完成")
+        except Exception as e:
+            log(f"  ❌ 处理失败: {e}")
+            processed = img
+
+        # 导出
+        fmt = output_format or cfg.processing.output_format
+        stem = Path(name).stem
+        out_path = output_dir / f"{stem}_edited.{fmt}"
+        try:
+            if fmt == "heic":
+                try:
+                    import pillow_heif
+                    processed.save(str(out_path), format="HEIF")
+                except ImportError:
+                    out_path = output_dir / f"{stem}_edited.jpeg"
+                    processed.save(str(out_path), format="JPEG", quality=cfg.processing.jpeg_quality)
+            else:
+                processed.save(str(out_path), format="JPEG", quality=cfg.processing.jpeg_quality)
+            export_paths.append(str(out_path))
+            log(f"  💾 导出: {out_path.name}")
+        except Exception as e:
+            log(f"  ❌ 导出失败: {e}")
+
+        # 第一张生成滑动对比
+        if i == 0:
+            orig_b64 = img_to_base64(img)
+            proc_b64 = img_to_base64(processed)
+            first_slider = build_slider_html(orig_b64, proc_b64)
+
+    total_time = time.time() - t0
+    success_count = len(export_paths)
+    log(f"🎉 全部完成! 成功 {success_count}/{len(images)}，耗时 {total_time:.1f}s")
+
+    summary = f"✅ 处理完成\n- 总计: {len(images)} 张\n- 成功: {success_count} 张\n- 输出目录: {output_dir}"
+
+    yield (
+        export_paths,
+        summary,
+        first_slider or empty_slider,
+        f'<div class="status-done">✅ 完成 {success_count}/{len(images)} 张，耗时 {total_time:.1f}s</div>',
+        make_log_html(logs),
     )
-    log.step(f"✅ 全部完成! 共 {len(paths)} 张")
-
-    comparison = {}
-    for i, result in enumerate(batch.results):
-        if result.success:
-            comparison[i] = {"original": result.original, "processed": result.processed, "name": Path(result.source_path).name}
-
-    summary = f"✅ 处理完成\n- 总计: {batch.total} 张\n- 成功: {batch.success_count} 张\n- 失败: {batch.fail_count} 张\n- 输出目录: {output_dir}"
-    first_processed = batch.results[0].processed if batch.results and batch.results[0].success else None
-    first_original = comparison[0]["original"] if 0 in comparison else None
-
-    return [str(p) for p in paths], summary, comparison, first_processed, first_original, False, "👁 按住看原图", log.to_html()
-
-
-def toggle_compare(comparison, showing_original):
-    """切换原图/处理后显示"""
-    if not comparison or 0 not in comparison:
-        return None, True, "👁 按住看原图"
-    item = comparison[0]
-    if showing_original:
-        # 当前显示原图 → 切换到处理后
-        return item["processed"], False, "👁 按住看原图"
-    else:
-        # 当前显示处理后 → 切换到原图
-        return item["original"], True, "👁 松开恢复处理后"
 
 
 # ── 构建界面 ──────────────────────────────────────
 
 def build_app() -> gr.Blocks:
     with gr.Blocks(title="AI Beautify", css=CUSTOM_CSS) as app:
-        all_data_state = gr.State([])
-        comparison_state = gr.State({})
-        showing_original = gr.State(False)
-
         gr.Markdown("# 🎨 AI Beautify\n全自动 AI 修图与调色工作流")
 
         with gr.Row():
@@ -230,68 +339,34 @@ def build_app() -> gr.Blocks:
                         suggestion_display = gr.Markdown(value="*上传照片后点击「分析」*")
                         json_display = gr.Code(language="json", label="JSON", visible=False)
 
-                    with gr.Tab("🔍 预览"):
-                        preview_img = gr.Image(label="预览", interactive=False, height=450)
-                        with gr.Row():
-                            compare_btn = gr.Button("👁 按住看原图", variant="secondary", size="sm")
-                            compare_hint = gr.Markdown("*处理完成后，点击按钮切换查看原图和处理后效果*")
+                    with gr.Tab("🔍 对比预览"):
+                        gr.Markdown("*处理完成后左右拖动滑块对比原图和处理后*")
+                        slider_display = gr.HTML(
+                            value="<div style='text-align:center;color:#888;padding:40px;'>处理完成后自动显示对比</div>",
+                        )
 
                     with gr.Tab("📁 导出"):
-                        output_gallery = gr.Gallery(label="处理结果", columns=3, height=400)
+                        output_gallery = gr.Gallery(
+                            label="处理结果", columns=3,
+                            height=500, object_fit="contain",
+                        )
                         export_summary = gr.Markdown()
 
-        # ── 日志面板 ──
-        log_display = gr.HTML(value="<div id='log-panel'><div class='log-empty'>等待操作...</div></div>")
+        # ── 日志面板（底部）──
+        log_display = gr.HTML(value=make_log_html([]))
 
         # ── 事件绑定 ──
 
-        def on_analyze(files, context, backend):
-            if not files:
-                yield "请上传照片", "", None, [], \
-                    '<div class="status-error">❌ 请先上传照片</div>', \
-                    "<div id='log-panel'><div class='log-empty'>等待操作...</div></div>"
-                return
-            yield "⏳ 正在分析...", "", None, [], \
-                '<div class="status-loading">⏳ 正在分析，请稍候...</div>', \
-                "<div id='log-panel'>⏳ 开始分析...</div>"
-            display, json_data, first_img, all_data, log_html = analyze_images(files, context, backend)
-            yield display, json_data, first_img, all_data, \
-                f'<div class="status-done">✅ 分析完成，共 {len(all_data)} 张</div>', \
-                f"<div id='log-panel'>{log_html}</div>"
-
         analyze_btn.click(
-            fn=on_analyze, inputs=[files, context, backend],
-            outputs=[suggestion_display, json_display, preview_img, all_data_state, status, log_display],
+            fn=analyze_images,
+            inputs=[files, context, backend],
+            outputs=[suggestion_display, json_display, log_display, slider_display, status],
         )
-
-        def on_process(files, context, backend, output_format):
-            if not files:
-                yield [], "请先上传照片", {}, None, None, True, "👁 按住看原图", \
-                    '<div class="status-error">❌ 请先上传照片</div>', \
-                    "<div id='log-panel'><div class='log-empty'>等待操作...</div></div>"
-                return
-            yield [], "⏳ 正在处理...", {}, None, None, True, "👁 按住看原图", \
-                '<div class="status-loading">⏳ 正在处理（VLM + 图像处理 + 导出）...</div>', \
-                "<div id='log-panel'>⏳ 开始处理...</div>"
-            result = process_and_export(files, context, backend, output_format)
-            paths, summary, comparison, first_processed, first_original, show_orig, btn_text, log_html = result
-            yield paths, summary, comparison, first_processed, first_original, show_orig, btn_text, \
-                '<div class="status-done">✅ 处理完成</div>', \
-                f"<div id='log-panel'>{log_html}</div>"
 
         process_btn.click(
-            fn=on_process, inputs=[files, context, backend, output_format],
-            outputs=[output_gallery, export_summary, comparison_state, preview_img, preview_img,
-                     showing_original, compare_btn, status, log_display],
-        )
-
-        def on_toggle(comparison, showing_original):
-            img, showing, btn_text = toggle_compare(comparison, showing_original)
-            return img, showing, btn_text
-
-        compare_btn.click(
-            fn=on_toggle, inputs=[comparison_state, showing_original],
-            outputs=[preview_img, showing_original, compare_btn],
+            fn=process_and_export,
+            inputs=[files, context, backend, output_format],
+            outputs=[output_gallery, export_summary, slider_display, status, log_display],
         )
 
     return app
