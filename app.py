@@ -124,7 +124,7 @@ def process_and_export(files, context, backend, output_format):
 # ── Gradio 界面 ──────────────────────────────────────
 
 def build_app() -> gr.Blocks:
-    with gr.Blocks(title="AI Beautify", theme=gr.themes.Soft()) as app:
+    with gr.Blocks(title="AI Beautify") as app:
         gr.Markdown("# 🎨 AI Beautify\n全自动 AI 修图与调色工作流")
 
         with gr.Row():
@@ -185,8 +185,18 @@ def build_app() -> gr.Blocks:
 
 
 def main():
+    import socket
+
+    def find_free_port(start=7860, end=7870):
+        for port in range(start, end):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(("127.0.0.1", port)) != 0:
+                    return port
+        return start
+
+    port = find_free_port()
     app = build_app()
-    app.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    app.launch(server_name="0.0.0.0", server_port=port, share=False)
 
 
 if __name__ == "__main__":
