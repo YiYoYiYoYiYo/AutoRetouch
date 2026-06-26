@@ -1,6 +1,7 @@
 """批量处理管线：VLM 分析 → 分割 → 处理 → 导出"""
 
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,7 +51,7 @@ class BatchPipeline:
         images: list[tuple[str, Image.Image]],
         context: str = "",
         backend: str | None = None,
-        on_progress: callable | None = None,
+        on_progress: Callable | None = None,
     ) -> list[EditSuggestion]:
         """批量 VLM 分析（带并发控制）
 
@@ -92,7 +93,7 @@ class BatchPipeline:
         self,
         images: list[tuple[str, Image.Image]],
         suggestions: list[EditSuggestion],
-        on_progress: callable | None = None,
+        on_progress: Callable | None = None,
     ) -> BatchResult:
         """批量处理图片
 
@@ -180,7 +181,7 @@ class BatchPipeline:
         batch: BatchResult,
         output_dir: Path,
         fmt: str | None = None,
-        on_progress: callable | None = None,
+        on_progress: Callable | None = None,
     ) -> list[Path]:
         """批量导出"""
         paths = []
