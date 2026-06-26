@@ -1,0 +1,27 @@
+[project]
+name = "ai-beautify"
+version = "0.1.0"
+description = "全自动 AI 修图与调色工作流"
+requires-python = ">=3.10"
+dependencies = [
+    "gradio>=4.0",
+    "Pillow>=10.0",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "requests>=2.31",
+    "rawpy>=0.19",
+    "pillow-heif>=0.16",
+    "colour-science>=0.4",
+]
+
+[project.optional-dependencies]
+# 完整版：包含 GroundingDINO + SAM2 分割（需要 PyTorch）
+full = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "transformers>=4.35",
+    "segment-anything-2>=1.0",
+]
+
+[project.scripts]
+ai-beautify = "app:main"
