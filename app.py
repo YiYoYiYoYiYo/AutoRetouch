@@ -190,7 +190,7 @@ def analyze_images(files, context, backend):
         yield "⏳ 分析中...", "", make_log_html(logs), empty_slider, f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]...</div>'
 
         try:
-            suggestion = pipeline._bridge.analyze(img, context, backend or None)
+            suggestion = pipeline._bridge.analyze(img, context, None if backend in ("自动", "") else backend)
             suggestions.append(suggestion)
             log(f"  → 风格: {suggestion.style}")
         except Exception as e:
@@ -255,7 +255,7 @@ def process_and_export(files, context, backend, output_format):
             f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]: {Path(name).name}</div>', make_log_html(logs)
 
         try:
-            suggestion = pipeline._bridge.analyze(img, context, backend or None)
+            suggestion = pipeline._bridge.analyze(img, context, None if backend in ("自动", "") else backend)
             log(f"  → 风格: {suggestion.style}")
         except Exception as e:
             log(f"  ❌ 分析失败: {e}")
@@ -325,7 +325,7 @@ def build_app() -> gr.Blocks:
                 files = gr.File(label="上传照片", file_count="multiple", file_types=["image"])
                 context = gr.Textbox(label="场景描述", placeholder="例如：苏州园林旅行照", lines=2)
                 with gr.Row():
-                    backend = gr.Radio(choices=["glm", "agnes", "ollama"], label="VLM 后端", value="", info="留空自动降级")
+                    backend = gr.Radio(choices=["自动", "glm", "agnes", "ollama"], label="VLM 后端", value="自动", info="自动=按优先级降级")
                     output_format = gr.Radio(choices=["jpeg", "heic"], label="输出格式", value="jpeg")
                 status = gr.HTML(value='<div class="status-idle">📷 等待上传照片</div>')
                 with gr.Row():
