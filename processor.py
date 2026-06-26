@@ -1,4 +1,11 @@
-"""图像处理引擎：全局调整 + 局部 mask 调整"""
+"""图像处理引擎：全局调整 + 局部 mask 调整
+
+采用接近 Lightroom 的调色逻辑：
+- 曝光：gamma 校正（非线性乘法），保护高光
+- 对比度：S 曲线（sigmoid），保持动态范围
+- 高光/阴影：区域化 tone mapping，不互相影响
+- 白平衡：相对增益校正
+"""
 
 import cv2
 import numpy as np
@@ -16,19 +23,10 @@ class ImageProcessor:
         self._segmenter = segmenter or ImageSegmenter()
 
     def process(self, image: Image.Image, suggestion: EditSuggestion) -> Image.Image:
-        """根据修图建议处理图片
-
-        Args:
-            image: 原始图片
-            suggestion: VLM 输出的修图建议
-
-        Returns:
-            处理后的图片
-        """
-        # 转为 numpy float32 (0-1 范围)
+        """根据修图建议处理图片"""
         img = np.array(image.convert("RGB")).astype(np.float32) / 255.0
 
-        # 1. 全局调整
+        # 1. 全局调整（基于原图一次性计算）
         img = self._apply_global(img, suggestion.global_params)
 
         # 2. 局部调整
@@ -38,7 +36,6 @@ class ImageProcessor:
             )
             img = self._apply_local(img, adj, mask)
 
-        # 裁剪到合法范围并转回 uint8
         img = np.clip(img * 255, 0, 255).astype(np.uint8)
         return Image.fromarray(img)
 
@@ -46,30 +43,27 @@ class ImageProcessor:
 
     def _apply_global(self, img: np.ndarray, gp: GlobalParams) -> np.ndarray:
         """应用全局调整"""
-        # 曝光：EV 值 → 亮度乘数
-        if gp.exposure_ev != 0:
-            img = img * (2.0 ** gp.exposure_ev)
-
-        # 白平衡：色温 K → RGB 增益
+        # 白平衡（最先做，不改变亮度）
         if gp.white_balance_k != 5500:
             img = self._apply_white_balance(img, gp.white_balance_k)
 
-        # 对比度
+        # 曝光：gamma 校正（比线性乘法更自然）
+        if gp.exposure_ev != 0:
+            gamma = 1.0 / (2.0 ** gp.exposure_ev)
+            img = np.power(np.clip(img, 0, 1), gamma)
+
+        # 对比度：S 曲线（sigmoid 方式，不溢出）
         if gp.contrast != 0:
-            factor = 1.0 + gp.contrast / 100.0
-            img = (img - 0.5) * factor + 0.5
+            strength = gp.contrast / 200.0  # 归一化到 -0.5 ~ +0.5
+            img = self._sigmoid_contrast(img, strength)
 
-        # 高光
+        # 高光：仅影响亮部（加权混合）
         if gp.highlights != 0:
-            mask = img > 0.5
-            shift = gp.highlights / 200.0
-            img[mask] = np.clip(img[mask] + shift, 0, 1)
+            img = self._tone_region(img, gp.highlights / 100.0, mode="highlights")
 
-        # 阴影
+        # 阴影：仅影响暗部
         if gp.shadows != 0:
-            mask = img < 0.5
-            shift = gp.shadows / 200.0
-            img[mask] = np.clip(img[mask] + shift, 0, 1)
+            img = self._tone_region(img, gp.shadows / 100.0, mode="shadows")
 
         # 饱和度
         if gp.saturation != 0:
@@ -77,49 +71,83 @@ class ImageProcessor:
 
         return np.clip(img, 0, 1)
 
-    def _apply_white_balance(self, img: np.ndarray, temp_k: int) -> np.ndarray:
-        """色温调整：基于 Planckian locus 近似"""
-        # 将色温映射到 RGB 增益
-        # 参考: http://www.tannerhelland.com/4435/convert-temperature-rgb-algorithm-code/
+    @staticmethod
+    def _sigmoid_contrast(img: np.ndarray, strength: float) -> np.ndarray:
+        """S 曲线对比度调整，strength ∈ (-0.5, +0.5)"""
+        if strength == 0:
+            return img
+        # 中点 0.5 的 sigmoid 变换
+        midpoint = 0.5
+        # 调节 steepness
+        k = strength * 10.0  # 映射到 -5 ~ +5
+        # 避免除零
+        result = 1.0 / (1.0 + np.exp(-k * (img - midpoint)))
+        # 归一化到 0-1（sigmoid 在 0 和 1 处渐近）
+        lo = 1.0 / (1.0 + np.exp(-k * (0.0 - midpoint)))
+        hi = 1.0 / (1.0 + np.exp(-k * (1.0 - midpoint)))
+        result = (result - lo) / (hi - lo)
+        return np.clip(result, 0, 1)
+
+    @staticmethod
+    def _tone_region(img: np.ndarray, amount: float, mode: str) -> np.ndarray:
+        """区域化 tone mapping：只影响高光或阴影区域
+
+        使用 luminance 作为权重，避免区域边界跳变。
+        """
+        # 亮度权重（0-1）
+        lum = 0.2126 * img[:, :, 0] + 0.7152 * img[:, :, 1] + 0.0722 * img[:, :, 2]
+
+        if mode == "highlights":
+            # 亮部权重：luminance 越高，权重越大（smoothstep）
+            weight = np.clip((lum - 0.5) * 2.0, 0, 1) ** 2
+            # 调整方向：正值提亮，负值压暗
+            shift = amount * 0.3  # 控制幅度
+        else:  # shadows
+            # 暗部权重：luminance 越低，权重越大
+            weight = np.clip(1.0 - lum * 2.0, 0, 1) ** 2
+            shift = amount * 0.3
+
+        # 用 weight 做加权混合
+        for c in range(3):
+            img[:, :, c] += shift * weight
+
+        return np.clip(img, 0, 1)
+
+    @staticmethod
+    def _apply_white_balance(img: np.ndarray, temp_k: int) -> np.ndarray:
+        """色温调整：相对 6500K（标准日光）的增益校正"""
         temp = temp_k / 100.0
 
-        # Red channel
-        if temp <= 66:
-            r = 255.0
-        else:
-            r = 329.698727446 * ((temp - 60) ** -0.1332047592)
-            r = max(0, min(255, r))
+        # 计算目标色温的 RGB 值（Tanner Helland 算法）
+        def _temp_to_rgb(t: float) -> tuple[float, float, float]:
+            # Red
+            r = 255.0 if t <= 66 else 329.698727446 * ((t - 60) ** -0.1332047592)
+            # Green
+            g = (99.4708025861 * np.log(t) - 161.1195681661) if t <= 66 else 288.1221695283 * ((t - 60) ** -0.0755148492)
+            # Blue
+            if t >= 66:
+                b = 255.0
+            elif t <= 19:
+                b = 0.0
+            else:
+                b = 138.5177312231 * np.log(t - 10) - 305.0447927307
+            return (max(0, min(255, r)) / 255, max(0, min(255, g)) / 255, max(0, min(255, b)) / 255)
 
-        # Green channel
-        if temp <= 66:
-            g = 99.4708025861 * np.log(temp) - 161.1195681661
-        else:
-            g = 288.1221695283 * ((temp - 60) ** -0.0755148492)
-        g = max(0, min(255, g))
+        # 参考色温 6500K（标准日光白平衡点）
+        ref_r, ref_g, ref_b = _temp_to_rgb(65.0)
+        tgt_r, tgt_g, tgt_b = _temp_to_rgb(temp)
 
-        # Blue channel
-        if temp >= 66:
-            b = 255.0
-        elif temp <= 19:
-            b = 0.0
-        else:
-            b = 138.5177312231 * np.log(temp - 10) - 305.0447927307
-            b = max(0, min(255, b))
+        # 相对增益
+        gain = np.array([tgt_r / ref_r, tgt_g / ref_g, tgt_b / ref_b], dtype=np.float32)
 
-        # 归一化增益
-        r_gain = r / 255.0
-        g_gain = g / 255.0
-        b_gain = b / 255.0
-
-        # 中性化（相对 5500K 的增益）
-        neutral = np.array([1.0, 1.0, 1.0])  # 5500K 近似中性
-        gain = np.array([r_gain, g_gain, b_gain]) / neutral
+        # 平衡总亮度（避免色温改变整体亮度）
+        gain /= gain.mean()
 
         return img * gain
 
-    def _apply_saturation(self, img: np.ndarray, amount: int) -> np.ndarray:
-        """饱和度调整"""
-        # 转到 HSV
+    @staticmethod
+    def _apply_saturation(img: np.ndarray, amount: int) -> np.ndarray:
+        """饱和度调整（在 HSV 空间）"""
         hsv = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
         hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1.0 + amount / 100.0), 0, 255)
         result = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
@@ -127,39 +155,39 @@ class ImageProcessor:
 
     # ── 局部调整 ─────────────────────────────────────
 
+    @staticmethod
     def _apply_local(
-        self, img: np.ndarray, adj: LocalAdjustment, mask: np.ndarray,
+        img: np.ndarray, adj: LocalAdjustment, mask: np.ndarray,
     ) -> np.ndarray:
-        """应用局部调整"""
+        """应用局部调整（加权混合，不直接加法）"""
         h, w = img.shape[:2]
 
-        # 调整 mask 尺寸
         if mask.shape[:2] != (h, w):
             mask = cv2.resize(mask, (w, h))
 
-        # 归一化 mask 到 0-1
         mask_f = mask.astype(np.float32) / 255.0
 
-        # 创建调整层
-        adjustment = np.zeros_like(img)
+        # 计算调整后的版本
+        adjusted = img.copy()
 
         if adj.adjustment_type in ("brighten", "darken"):
             ev = adj.exposure_ev if adj.adjustment_type == "brighten" else -abs(adj.exposure_ev)
-            adjustment = np.full_like(img, 2.0 ** ev - 1.0)
+            gamma = 1.0 / (2.0 ** ev) if ev != 0 else 1.0
+            adjusted = np.power(np.clip(adjusted, 0, 1), gamma)
         elif adj.adjustment_type == "warm":
-            adjustment[:, :, 0] = 0.05  # 增加红色
-            adjustment[:, :, 2] = -0.05  # 减少蓝色
+            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] + 0.05, 0, 1)
+            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] - 0.05, 0, 1)
         elif adj.adjustment_type == "cool":
-            adjustment[:, :, 0] = -0.05
-            adjustment[:, :, 2] = 0.05
+            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] - 0.05, 0, 1)
+            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] + 0.05, 0, 1)
 
         if adj.temperature_shift != 0:
             shift = adj.temperature_shift / 2000.0
-            adjustment[:, :, 0] += shift
-            adjustment[:, :, 2] -= shift
+            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] + shift, 0, 1)
+            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] - shift, 0, 1)
 
-        # 应用 mask
+        # 用 mask 做加权混合（而非加法）
         for c in range(3):
-            img[:, :, c] += adjustment[:, :, c] * mask_f
+            img[:, :, c] = img[:, :, c] * (1 - mask_f) + adjusted[:, :, c] * mask_f
 
         return np.clip(img, 0, 1)
