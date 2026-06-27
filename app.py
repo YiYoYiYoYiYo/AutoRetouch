@@ -280,12 +280,15 @@ def process_and_export(files, context, backend, output_format):
 
 SLIDER_JS = """
 function() {
+    var sliderBound = false;
+
     function initSlider() {
         var container = document.getElementById('slider-container');
         var clip = document.getElementById('slider-clip');
         var handle = document.getElementById('slider-handle');
         var clipImg = document.getElementById('slider-orig-img');
-        if (!container || !clip || !handle || !clipImg) return;
+        if (!container || !clip || !handle || !clipImg) return false;
+        if (container._bound) return true;
 
         function setPosition(clientX) {
             var rect = container.getBoundingClientRect();
@@ -303,26 +306,32 @@ function() {
         }
 
         var dragging = false;
-        container.onmousedown = function(e) { dragging = true; setPosition(e.clientX); e.preventDefault(); };
-        document.onmousemove = function(e) { if (dragging) setPosition(e.clientX); };
-        document.onmouseup = function() { dragging = false; };
-        container.ontouchstart = function(e) { dragging = true; setPosition(e.touches[0].clientX); e.preventDefault(); };
-        container.ontouchmove = function(e) { if (dragging) { setPosition(e.touches[0].clientX); e.preventDefault(); } };
-        container.ontouchend = function() { dragging = false; };
+        container.addEventListener('mousedown', function(e) { dragging = true; setPosition(e.clientX); e.preventDefault(); });
+        document.addEventListener('mousemove', function(e) { if (dragging) setPosition(e.clientX); });
+        document.addEventListener('mouseup', function() { dragging = false; });
+        container.addEventListener('touchstart', function(e) { dragging = true; setPosition(e.touches[0].clientX); e.preventDefault(); }, {passive: false});
+        document.addEventListener('touchmove', function(e) { if (dragging) { setPosition(e.touches[0].clientX); e.preventDefault(); } }, {passive: false});
+        document.addEventListener('touchend', function() { dragging = false; });
         window.addEventListener('resize', function() { clipImg.style.width = container.offsetWidth + 'px'; });
+
+        container._bound = true;
+        return true;
     }
 
-    // Watch for slider container to appear
-    var observer = new MutationObserver(function(mutations) {
-        if (document.getElementById('slider-container')) {
+    // Poll for slider container (Gradio dynamically updates DOM)
+    var poll = setInterval(function() {
+        if (initSlider()) {
+            clearInterval(poll);
+        }
+    }, 500);
+
+    // Also re-init when slider HTML changes (new processing result)
+    var reInit = setInterval(function() {
+        var c = document.getElementById('slider-container');
+        if (c && !c._bound) {
             initSlider();
         }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    // Also try on load
-    if (document.readyState === 'complete') { initSlider(); }
-    else { window.addEventListener('load', initSlider); }
+    }, 1000);
 }
 """
 
