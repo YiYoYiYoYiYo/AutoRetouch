@@ -159,7 +159,11 @@ class ImageProcessor:
     def _apply_local(
         img: np.ndarray, adj: LocalAdjustment, mask: np.ndarray,
     ) -> np.ndarray:
-        """应用局部调整（加权混合，不直接加法）"""
+        """应用局部调整：adjustment_type 为唯一行为开关，mask 加权混合
+
+        设计原则：曝光型只动亮度、颜色型只动 R/B 通道，二者不交叉。
+        颜色型真正使用 temperature_shift（0 时给方向性默认 0.20，保证可见效果）。
+        """
         h, w = img.shape[:2]
 
         if mask.shape[:2] != (h, w):
@@ -167,36 +171,33 @@ class ImageProcessor:
 
         mask_f = mask.astype(np.float32) / 255.0
 
-        # 计算调整后的版本
         adjusted = img.copy()
+        t = adj.adjustment_type  # bridge.clamp 已小写化
 
-        t = adj.adjustment_type.lower()
-
+        # ── 曝光型：gamma 校正，只改亮度 ──
         if t in ("brighten", "darken", "shadows", "highlights"):
-            ev = abs(adj.exposure_ev) if adj.exposure_ev != 0 else 0.3
+            ev = adj.exposure_ev if adj.exposure_ev != 0 else 0.3
             if t == "darken":
-                ev = -ev
+                ev = -abs(ev)
             elif t == "shadows":
-                ev = abs(ev)  # shadows 总是提亮
+                ev = abs(ev)       # 阴影总是提亮
             elif t == "highlights":
-                ev = -abs(ev)  # highlights 总是压暗
+                ev = -abs(ev)      # 高光总是压暗
             gamma = 1.0 / (2.0 ** ev) if ev != 0 else 1.0
             adjusted = np.power(np.clip(adjusted, 0, 1), gamma)
+
+        # ── 颜色型：R/B 通道偏移，真正使用 temperature_shift ──
         elif t in ("warm", "warmth"):
-            shift = max(abs(adj.temperature_shift) / 2000.0, 0.15)
+            shift = adj.temperature_shift / 2000.0 if adj.temperature_shift != 0 else 0.20
             adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] + shift, 0, 1)
             adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] - shift * 0.7, 0, 1)
         elif t in ("cool", "cooling"):
-            shift = max(abs(adj.temperature_shift) / 2000.0, 0.15)
+            shift = adj.temperature_shift / 2000.0 if adj.temperature_shift != 0 else 0.20
             adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] - shift * 0.7, 0, 1)
             adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] + shift, 0, 1)
+        # 未知类型 → adjusted 保持原图，不报错（mask 区域无变化）
 
-        if adj.temperature_shift != 0:
-            shift = adj.temperature_shift / 2000.0
-            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] + shift, 0, 1)
-            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] - shift, 0, 1)
-
-        # 用 mask 做加权混合（而非加法）
+        # 用 mask 做加权混合（而非加法，避免边界跳变）
         for c in range(3):
             img[:, :, c] = img[:, :, c] * (1 - mask_f) + adjusted[:, :, c] * mask_f
 

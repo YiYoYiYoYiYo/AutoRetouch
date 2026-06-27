@@ -15,12 +15,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# 完整版：包含 GroundingDINO + SAM2 分割（需要 PyTorch）
+# 完整版：包含 SAM2 分割（经 transformers 内置 Sam2Model，无需单独的 segment-anything-2）
+# 安装：见 requirements-full.txt（Windows CPU torch 需指定 CPU 索引避免拉 2.5GB CUDA 轮子）
 full = [
-    "torch>=2.0",
-    "torchvision>=0.15",
-    "transformers>=4.35",
-    "segment-anything-2>=1.0",
+    "torch>=2.10",
+    "torchvision>=0.20",
+    "transformers>=5.10",
 ]
 
 [project.scripts]

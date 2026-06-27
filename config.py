@@ -48,8 +48,18 @@ class ProcessingConfig:
     output_format: str = "jpeg"  # jpeg / heic
     jpeg_quality: int = 95
     max_dimension: int = 8192  # 最大边长
-    local_adjustment_radius: float = 0.15  # 局部调整默认半径(相对坐标)
+    local_adjustment_radius: float = 0.15  # 局部调整默认半径(相对坐标)，grabcut 降级时使用
     mask_feather: int = 30  # mask 羽化像素
+
+
+@dataclass
+class SegmentationConfig:
+    """分割引擎配置"""
+    enable_sam2: bool = True        # 默认用 SAM2，加载失败/未装依赖时自动降级 grabcut
+    use_gdino: bool = False         # 可选开关：开启后先用 GroundingDINO 检测 box 再喂给 SAM2（更准但更慢）
+    sam2_model: str = "facebook/sam2-hiera-tiny"   # HuggingFace 上的 SAM2 模型名
+    gdino_model: str = "IDEA-Research/grounding-dino-tiny"
+    device: str = "cpu"             # Intel Arc 的 IPEX-XPU 对 py3.13 不稳，统一 CPU 推理
 
 
 @dataclass
@@ -60,6 +70,7 @@ class AppConfig:
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     param_spec: ParamSpec = field(default_factory=ParamSpec)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
     default_backend: str = "glm"  # glm / agnes / ollama
     max_concurrent: int = 5  # 最大并发数
 

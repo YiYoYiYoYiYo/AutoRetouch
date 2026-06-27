@@ -1,6 +1,15 @@
--r requirements.txt
-rawpy>=0.19
-pillow-heif>=0.16
-torch>=2.0
-torchvision>=0.15
-transformers>=4.35
+# 完整版依赖：接通 SAM2 分割（经 transformers 内置 Sam2Model）
+# 适用于希望局部调整拿到高质量语义 mask 的用户。
+# 仅核心修图功能（无 AI 分割）只需 requirements.txt 即可。
+
+# ── 安装顺序（Windows，CPU 推理；Intel Arc 的 GPU 加速库 IPEX-XPU 对 py3.13 不稳定，故走 CPU）──
+# 1. 先装 CPU 版 torch + torchvision（避免默认拉 2.5GB CUDA 轮子）：
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#    若官方源慢，用清华镜像兜底：
+#    pip install torch torchvision -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 2. 再装 transformers（5.x 内置 Sam2Model/Sam2Processor，且兼容 huggingface-hub 1.x）：
+#    pip install "transformers>=5.10"
+
+torch>=2.10
+torchvision>=0.20
+transformers>=5.10

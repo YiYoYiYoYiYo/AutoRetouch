@@ -63,8 +63,11 @@ class VLMBridge:
         if not provider:
             raise ValueError(f"未知的 VLM 后端: {name}")
         suggestion = provider.analyze(image, context)
-        # 参数规范化
+        # 参数规范化：全局 + 局部都夹取范围（对称处理，防止 VLM 越界值污染下游）
         suggestion.global_params = suggestion.global_params.clamp(cfg.param_spec)
+        suggestion.local_adjustments = [
+            la.clamp(cfg.param_spec) for la in suggestion.local_adjustments
+        ]
         return suggestion
 
     @property

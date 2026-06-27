@@ -17,8 +17,8 @@ _PROMPT = """你是专业修图师。分析这张照片，输出JSON修图建议
 contrast/highlights/shadows/saturation:-100到+100(int), 坐标0-1(float)。
 
 输出格式：
-{{"analysis":"分析","style":"风格","global":{{"exposure_ev":0.0,"white_balance_k":5500,"contrast":0,"highlights":0,"shadows":0,"saturation":0}},"local":[{{"description":"区域","x":0.5,"y":0.5,"type":"brighten","exposure_ev":0.5,"reason":"理由"}}]}}
-只输出JSON。"""
+{{"analysis":"分析","style":"风格","global":{{"exposure_ev":0.0,"white_balance_k":5500,"contrast":0,"highlights":0,"shadows":0,"saturation":0}},"local":[{{"description":"区域","x":0.5,"y":0.5,"type":"brighten|darken|warm|warmth|cool|cooling|shadows|highlights","exposure_ev":0.5,"temperature_shift":200,"reason":"理由"}}]}}
+type 规则：brighten/darken/shadows/highlights 看曝光参数 exposure_ev；warm/warmth/cool/cooling 看色温参数 temperature_shift(-100~100，暖为正、冷为负)。只输出JSON。"""
 
 
 class OllamaProvider(VLMProvider):
