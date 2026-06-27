@@ -170,16 +170,26 @@ class ImageProcessor:
         # 计算调整后的版本
         adjusted = img.copy()
 
-        if adj.adjustment_type in ("brighten", "darken"):
-            ev = adj.exposure_ev if adj.adjustment_type == "brighten" else -abs(adj.exposure_ev)
+        t = adj.adjustment_type.lower()
+
+        if t in ("brighten", "darken", "shadows", "highlights"):
+            ev = abs(adj.exposure_ev) if adj.exposure_ev != 0 else 0.3
+            if t == "darken":
+                ev = -ev
+            elif t == "shadows":
+                ev = abs(ev)  # shadows 总是提亮
+            elif t == "highlights":
+                ev = -abs(ev)  # highlights 总是压暗
             gamma = 1.0 / (2.0 ** ev) if ev != 0 else 1.0
             adjusted = np.power(np.clip(adjusted, 0, 1), gamma)
-        elif adj.adjustment_type == "warm":
-            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] + 0.05, 0, 1)
-            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] - 0.05, 0, 1)
-        elif adj.adjustment_type == "cool":
-            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] - 0.05, 0, 1)
-            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] + 0.05, 0, 1)
+        elif t in ("warm", "warmth"):
+            shift = max(abs(adj.temperature_shift) / 2000.0, 0.15)
+            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] + shift, 0, 1)
+            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] - shift * 0.7, 0, 1)
+        elif t in ("cool", "cooling"):
+            shift = max(abs(adj.temperature_shift) / 2000.0, 0.15)
+            adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] - shift * 0.7, 0, 1)
+            adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] + shift, 0, 1)
 
         if adj.temperature_shift != 0:
             shift = adj.temperature_shift / 2000.0
