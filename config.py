@@ -56,7 +56,7 @@ class ProcessingConfig:
 class SegmentationConfig:
     """分割引擎配置"""
     enable_sam2: bool = True        # 默认用 SAM2，加载失败/未装依赖时自动降级 grabcut
-    use_gdino: bool = False         # 可选开关：开启后先用 GroundingDINO 检测 box 再喂给 SAM2（更准但更慢）
+    use_gdino: bool = True          # 开启后先用 GroundingDINO 按文字描述检测 box，再喂给 SAM2（更准但首图更慢）
     sam2_model: str = "facebook/sam2-hiera-tiny"   # HuggingFace 上的 SAM2 模型名
     gdino_model: str = "IDEA-Research/grounding-dino-tiny"
     device: str = "cpu"             # Intel Arc 的 IPEX-XPU 对 py3.13 不稳，统一 CPU 推理

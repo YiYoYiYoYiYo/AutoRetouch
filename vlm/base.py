@@ -40,7 +40,7 @@ class LocalAdjustment:
     description: str = ""          # 区域描述，如"前景草丛"
     x: float = 0.5                 # 相对坐标 0-1
     y: float = 0.5                 # 相对坐标 0-1
-    adjustment_type: str = "brighten"  # brighten/darken/warm/warmth/cool/cooling/shadows/highlights
+    adjustment_type: str = "brighten"  # brighten/darken/warm/warmth/cool/cooling/shadows/highlights/vignette/blur
     exposure_ev: float = 0.0       # 局部曝光调整
     temperature_shift: int = 0     # 局部色温偏移（仅 warm/cool 类生效）
     reason: str = ""               # 调整理由

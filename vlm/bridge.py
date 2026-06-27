@@ -68,6 +68,19 @@ class VLMBridge:
         suggestion.local_adjustments = [
             la.clamp(cfg.param_spec) for la in suggestion.local_adjustments
         ]
+
+        gp = suggestion.global_params
+        logger.info(
+            "[bridge] %s 全局参数: EV=%+.2f WB=%dK contrast=%+d highlights=%+d shadows=%+d sat=%+d",
+            name, gp.exposure_ev, gp.white_balance_k, gp.contrast,
+            gp.highlights, gp.shadows, gp.saturation,
+        )
+        for i, la in enumerate(suggestion.local_adjustments):
+            logger.info(
+                "[bridge] %s 局部[%d]: type=%s xy=(%.2f,%.2f) ev=%+.2f temp_shift=%+d desc='%s'",
+                name, i, la.adjustment_type, la.x, la.y,
+                la.exposure_ev, la.temperature_shift, la.description,
+            )
         return suggestion
 
     @property

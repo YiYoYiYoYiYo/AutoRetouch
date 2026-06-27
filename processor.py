@@ -7,6 +7,8 @@
 - 白平衡：相对增益校正
 """
 
+import logging
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -14,6 +16,8 @@ from PIL import Image
 from config import cfg
 from vlm.base import EditSuggestion, GlobalParams, LocalAdjustment
 from segmentation.segmenter import ImageSegmenter
+
+logger = logging.getLogger(__name__)
 
 
 class ImageProcessor:
@@ -24,51 +28,62 @@ class ImageProcessor:
 
     def process(self, image: Image.Image, suggestion: EditSuggestion) -> Image.Image:
         """根据修图建议处理图片"""
+        logger.info("[processor] 开始处理: %d 个局部调整", len(suggestion.local_adjustments))
         img = np.array(image.convert("RGB")).astype(np.float32) / 255.0
 
         # 1. 全局调整（基于原图一次性计算）
         img = self._apply_global(img, suggestion.global_params)
 
         # 2. 局部调整
-        for adj in suggestion.local_adjustments:
+        for i, adj in enumerate(suggestion.local_adjustments):
+            logger.info("[processor] 局部[%d/%d] '%s' → 分割中...", i + 1, len(suggestion.local_adjustments), adj.description)
             mask = self._segmenter.segment(
                 image, adj.description, adj.x, adj.y,
             )
             img = self._apply_local(img, adj, mask)
 
         img = np.clip(img * 255, 0, 255).astype(np.uint8)
+        logger.info("[processor] 处理完成")
         return Image.fromarray(img)
 
     # ── 全局调整 ─────────────────────────────────────
 
     def _apply_global(self, img: np.ndarray, gp: GlobalParams) -> np.ndarray:
         """应用全局调整"""
+        steps = []
         # 白平衡（最先做，不改变亮度）
         if gp.white_balance_k != 5500:
             img = self._apply_white_balance(img, gp.white_balance_k)
+            steps.append(f"WB={gp.white_balance_k}K")
 
         # 曝光：gamma 校正（比线性乘法更自然）
         if gp.exposure_ev != 0:
             gamma = 1.0 / (2.0 ** gp.exposure_ev)
             img = np.power(np.clip(img, 0, 1), gamma)
+            steps.append(f"EV={gp.exposure_ev:+.2f}(γ={gamma:.3f})")
 
         # 对比度：S 曲线（sigmoid 方式，不溢出）
         if gp.contrast != 0:
             strength = gp.contrast / 200.0  # 归一化到 -0.5 ~ +0.5
             img = self._sigmoid_contrast(img, strength)
+            steps.append(f"contrast={gp.contrast:+d}")
 
         # 高光：仅影响亮部（加权混合）
         if gp.highlights != 0:
             img = self._tone_region(img, gp.highlights / 100.0, mode="highlights")
+            steps.append(f"highlights={gp.highlights:+d}")
 
         # 阴影：仅影响暗部
         if gp.shadows != 0:
             img = self._tone_region(img, gp.shadows / 100.0, mode="shadows")
+            steps.append(f"shadows={gp.shadows:+d}")
 
         # 饱和度
         if gp.saturation != 0:
             img = self._apply_saturation(img, gp.saturation)
+            steps.append(f"sat={gp.saturation:+d}")
 
+        logger.info("[processor] 全局: %s", " | ".join(steps) if steps else "无调整（跳过）")
         return np.clip(img, 0, 1)
 
     @staticmethod
@@ -173,6 +188,7 @@ class ImageProcessor:
 
         adjusted = img.copy()
         t = adj.adjustment_type  # bridge.clamp 已小写化
+        coverage = np.count_nonzero(mask) / mask.size  # 0~1
 
         # ── 曝光型：gamma 校正，只改亮度 ──
         if t in ("brighten", "darken", "shadows", "highlights"):
@@ -185,20 +201,100 @@ class ImageProcessor:
                 ev = -abs(ev)      # 高光总是压暗
             gamma = 1.0 / (2.0 ** ev) if ev != 0 else 1.0
             adjusted = np.power(np.clip(adjusted, 0, 1), gamma)
+            logger.info("[processor] 局部 '%s' type=%s ev=%+.2f γ=%.3f 覆盖=%.1f%%",
+                        adj.description, t, ev, gamma, coverage * 100)
 
-        # ── 颜色型：R/B 通道偏移，真正使用 temperature_shift ──
+        # ── 颜色型：R/B 通道偏移，大面积自动衰减 ──
         elif t in ("warm", "warmth"):
             shift = adj.temperature_shift / 2000.0 if adj.temperature_shift != 0 else 0.20
+            shift *= ImageProcessor._area_scale(coverage)
             adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] + shift, 0, 1)
             adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] - shift * 0.7, 0, 1)
+            logger.info("[processor] 局部 '%s' type=%s temp_shift=%d 覆盖=%.1f%% → R+=%.3f B−=%.3f",
+                        adj.description, t, adj.temperature_shift, coverage * 100, shift, shift * 0.7)
         elif t in ("cool", "cooling"):
             shift = adj.temperature_shift / 2000.0 if adj.temperature_shift != 0 else 0.20
+            shift *= ImageProcessor._area_scale(coverage)
             adjusted[:, :, 0] = np.clip(adjusted[:, :, 0] - shift * 0.7, 0, 1)
             adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] + shift, 0, 1)
-        # 未知类型 → adjusted 保持原图，不报错（mask 区域无变化）
+            logger.info("[processor] 局部 '%s' type=%s temp_shift=%d 覆盖=%.1f%% → R−=%.3f B+=%.3f",
+                        adj.description, t, adj.temperature_shift, coverage * 100, shift * 0.7, shift)
+
+        # ── 效果型 ──
+        elif t == "vignette":
+            strength = abs(adj.exposure_ev) if adj.exposure_ev != 0 else 0.5
+            adjusted = ImageProcessor._apply_vignette(adjusted, adj.x, adj.y, strength)
+            logger.info("[processor] 局部 '%s' type=vignette str=%.2f xy=(%.2f,%.2f)",
+                        adj.description, strength, adj.x, adj.y)
+        elif t == "blur":
+            radius = max(1, int(abs(adj.exposure_ev) * 20)) if adj.exposure_ev != 0 else 15
+            adjusted = ImageProcessor._apply_lens_blur(adjusted, adj.x, adj.y, radius)
+            logger.info("[processor] 局部 '%s' type=blur radius=%d xy=(%.2f,%.2f)",
+                        adj.description, radius, adj.x, adj.y)
+
+        else:
+            logger.warning("[processor] 局部 '%s' 未知 type='%s'，跳过（mask 区域无变化）", adj.description, t)
 
         # 用 mask 做加权混合（而非加法，避免边界跳变）
         for c in range(3):
             img[:, :, c] = img[:, :, c] * (1 - mask_f) + adjusted[:, :, c] * mask_f
 
         return np.clip(img, 0, 1)
+
+    @staticmethod
+    def _area_scale(coverage: float) -> float:
+        """颜色型调整的面积衰减系数：mask 覆盖越大，强度越低
+
+        15% 以下 → 1.0（不衰减）
+        50% 以上 → 0.3（最低，防止大面积偏色）
+        中间线性插值
+        """
+        if coverage <= 0.15:
+            return 1.0
+        if coverage >= 0.50:
+            return 0.3
+        return 1.0 - 0.7 * (coverage - 0.15) / 0.35
+
+    @staticmethod
+    def _apply_vignette(
+        img: np.ndarray, cx: float, cy: float, strength: float,
+    ) -> np.ndarray:
+        """暗角效果：以 (cx,cy) 为中心径向暗化边缘
+
+        strength: 0~1，越大暗角越明显
+        """
+        h, w = img.shape[:2]
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        # 归一化到 [-1, 1]，中心为 (cx, cy)
+        nx = (xx / w - cx) * 2.0
+        ny = (yy / h - cy) * 2.0
+        dist = np.sqrt(nx ** 2 + ny ** 2)
+        # 暗角权重：距离中心越远越暗，smoothstep 过渡
+        vignette = 1.0 - np.clip((dist - 0.5) * 2.0, 0, 1) ** 2 * strength
+        for c in range(3):
+            img[:, :, c] *= vignette
+        return np.clip(img, 0, 1)
+
+    @staticmethod
+    def _apply_lens_blur(
+        img: np.ndarray, cx: float, cy: float, radius: int,
+    ) -> np.ndarray:
+        """镜头模糊（模拟浅景深）：以 (cx,cy) 为中心，越远越模糊
+
+        radius: 最大模糊半径（像素），越大景深越浅
+        """
+        h, w = img.shape[:2]
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        # 归一化距离
+        nx = (xx / w - cx) * 2.0
+        ny = (yy / h - cy) * 2.0
+        dist = np.sqrt(nx ** 2 + ny ** 2)
+        # 模糊强度：中心为 0，边缘线性增长
+        blur_amount = np.clip(dist, 0, 1)  # 0~1
+        # 生成模糊图
+        ksize = max(3, radius | 1)  # 保证奇数
+        blurred = cv2.GaussianBlur(img, (ksize, ksize), 0)
+        # 按 blur_amount 在原图和模糊图之间插值
+        blur_f = blur_amount[:, :, np.newaxis]
+        result = img * (1 - blur_f) + blurred * blur_f
+        return np.clip(result, 0, 1)

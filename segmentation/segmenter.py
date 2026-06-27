@@ -80,17 +80,23 @@ class ImageSegmenter:
                 if cfg.segmentation.use_gdino and _HAS_GDINO:
                     box = self._gdino_box(image, description)
                     if box is not None:
+                        logger.info("[segment] '%s' → GDINO 检测到 box %s → SAM2(box)", description, box)
                         return self._segment_sam2(image, input_boxes=box)
+                    logger.info("[segment] '%s' → GDINO 未检出 → SAM2(point xy=%.2f,%.2f)", description, x, y)
+                else:
+                    logger.info("[segment] '%s' → SAM2(point xy=%.2f,%.2f)", description, x, y)
                 return self._segment_sam2(image, point=(x, y))
             except Exception as e:
-                logger.warning("SAM2 分割失败，降级 GrabCut: %s", e)
+                logger.warning("[segment] '%s' → SAM2 失败，降级 GrabCut: %s", description, e)
 
         if self._mode == "gdino_grabcut" or (self._mode == "sam2" and cfg.segmentation.use_gdino):
             try:
+                logger.info("[segment] '%s' → GDINO+GrabCut(xy=%.2f,%.2f)", description, x, y)
                 return self._segment_gdino_grabcut(image, description, x, y, radius)
             except Exception as e:
-                logger.warning("GDINO+GrabCut 失败，降级纯 GrabCut: %s", e)
+                logger.warning("[segment] '%s' → GDINO+GrabCut 失败，降级纯 GrabCut: %s", description, e)
 
+        logger.info("[segment] '%s' → GrabCut(xy=%.2f,%.2f, r=%.2f)", description, x, y, radius)
         return self._segment_grabcut(image, x, y, radius)
 
     # ── SAM2 ─────────────────────────────────────────
@@ -164,6 +170,8 @@ class ImageSegmenter:
         mask = (mask > 0.5).astype(np.uint8) * 255
         if mask.shape[:2] != (h, w):
             mask = cv2.resize(mask, (w, h))
+        pct = np.count_nonzero(mask) / mask.size * 100
+        logger.info("[segment] SAM2 mask: best_iou=%.3f, 覆盖 %.1f%% 区域", ious[best], pct)
         return ImageSegmenter._feather(mask)
 
     def _gdino_box(self, image: Image.Image, description: str):

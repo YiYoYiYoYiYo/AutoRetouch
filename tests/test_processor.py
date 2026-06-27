@@ -182,6 +182,67 @@ def test_local_unknown_type_noop():
     assert diff < 1.0, f"未知类型应无变化，差异应极小，实际: {diff}"
 
 
+def test_area_scale_small_mask():
+    """小面积 mask 不衰减，大面积 mask 衰减"""
+    assert ImageProcessor._area_scale(0.10) == 1.0, "10% 不应衰减"
+    assert ImageProcessor._area_scale(0.15) == 1.0, "15% 不应衰减"
+    s50 = ImageProcessor._area_scale(0.50)
+    assert s50 == 0.3, f"50% 应衰减到 0.3，实际: {s50}"
+    s30 = ImageProcessor._area_scale(0.30)
+    assert 0.3 < s30 < 1.0, f"30% 应在 0.3~1.0 之间，实际: {s30}"
+
+
+class _BigFakeSeg:
+    """覆盖全图的假分割器（用于 vignette/blur 等全图效果测试）"""
+    def segment(self, image, description, x=0.5, y=0.5, radius=0.15):
+        w, h = image.size
+        return np.full((h, w), 255, dtype=np.uint8)
+
+
+def test_vignette_darkens_edges():
+    """vignette 应使边缘变暗，中心基本不变"""
+    proc = ImageProcessor()
+    proc._segmenter = _BigFakeSeg()
+    img = make_test_image()
+    suggestion = EditSuggestion(
+        global_params=GlobalParams(),
+        local_adjustments=[LocalAdjustment(
+            x=0.5, y=0.5, adjustment_type="vignette", exposure_ev=0.8,
+        )],
+    )
+    result = proc.process(img, suggestion)
+    orig = np.array(img).astype(float) / 255.0
+    res = np.array(result).astype(float) / 255.0
+    h, w = img.size[1], img.size[0]
+    # 边缘区域应变暗
+    edge = res[0:10, 0:10, :].mean()
+    orig_edge = orig[0:10, 0:10, :].mean()
+    assert edge < orig_edge, f"vignette 边缘应变暗，原始={orig_edge:.3f}，处理后={edge:.3f}"
+
+
+def test_blur_softens_edges():
+    """blur 应使远离中心的区域变模糊（方差降低）"""
+    proc = ImageProcessor()
+    proc._segmenter = _BigFakeSeg()
+    img = make_test_image()
+    suggestion = EditSuggestion(
+        global_params=GlobalParams(),
+        local_adjustments=[LocalAdjustment(
+            x=0.5, y=0.5, adjustment_type="blur", exposure_ev=0.8,
+        )],
+    )
+    result = proc.process(img, suggestion)
+    orig = np.array(img).astype(float) / 255.0
+    res = np.array(result).astype(float) / 255.0
+    h, w = img.size[1], img.size[0]
+    # 边缘区域的局部方差应降低（模糊了）
+    def local_var(arr, y, x, sz=20):
+        return arr[y:y+sz, x:x+sz, :].var()
+    orig_var = local_var(orig, 0, 0)
+    res_var = local_var(res, 0, 0)
+    assert res_var < orig_var, f"blur 边缘方差应降低，原始={orig_var:.5f}，处理后={res_var:.5f}"
+
+
 if __name__ == "__main__":
     test_global_exposure()
     print("✅ test_global_exposure")
@@ -199,4 +260,10 @@ if __name__ == "__main__":
     print("✅ test_local_warm_default_when_zero")
     test_local_unknown_type_noop()
     print("✅ test_local_unknown_type_noop")
+    test_area_scale_small_mask()
+    print("✅ test_area_scale_small_mask")
+    test_vignette_darkens_edges()
+    print("✅ test_vignette_darkens_edges")
+    test_blur_softens_edges()
+    print("✅ test_blur_softens_edges")
     print("\n全部测试通过！")

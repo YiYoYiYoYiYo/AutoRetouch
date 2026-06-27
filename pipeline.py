@@ -72,6 +72,9 @@ class BatchPipeline:
             try:
                 result = self._bridge.analyze(img, context, backend)
                 logger.info("分析完成 [%d/%d]: %s (后端: %s)", idx + 1, total, Path(name).name, result.backend)
+                # 记录原始 VLM 响应（截断到 800 字符避免日志过长）
+                raw = result.raw_response[:800].replace("\n", " ")
+                logger.info("[pipeline] VLM 原始响应: %s%s", raw, "..." if len(result.raw_response) > 800 else "")
                 if on_progress:
                     on_progress(idx + 1, total, name)
                 return idx, result
