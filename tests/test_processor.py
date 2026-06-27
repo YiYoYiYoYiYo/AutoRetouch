@@ -200,20 +200,15 @@ class _BigFakeSeg:
 
 
 def test_vignette_darkens_edges():
-    """vignette 应使边缘变暗，中心基本不变"""
+    """vignette 全局效果应使边缘变暗，中心基本不变"""
     proc = ImageProcessor()
-    proc._segmenter = _BigFakeSeg()
     img = make_test_image()
     suggestion = EditSuggestion(
-        global_params=GlobalParams(),
-        local_adjustments=[LocalAdjustment(
-            x=0.5, y=0.5, adjustment_type="vignette", exposure_ev=0.8,
-        )],
+        global_params=GlobalParams(vignette=0.8),
     )
     result = proc.process(img, suggestion)
     orig = np.array(img).astype(float) / 255.0
     res = np.array(result).astype(float) / 255.0
-    h, w = img.size[1], img.size[0]
     # 边缘区域应变暗
     edge = res[0:10, 0:10, :].mean()
     orig_edge = orig[0:10, 0:10, :].mean()
@@ -221,20 +216,15 @@ def test_vignette_darkens_edges():
 
 
 def test_blur_softens_edges():
-    """blur 应使远离中心的区域变模糊（方差降低）"""
+    """blur 全局效果应使远离中心的区域变模糊（方差降低）"""
     proc = ImageProcessor()
-    proc._segmenter = _BigFakeSeg()
     img = make_test_image()
     suggestion = EditSuggestion(
-        global_params=GlobalParams(),
-        local_adjustments=[LocalAdjustment(
-            x=0.5, y=0.5, adjustment_type="blur", exposure_ev=0.8,
-        )],
+        global_params=GlobalParams(blur=0.5),
     )
     result = proc.process(img, suggestion)
     orig = np.array(img).astype(float) / 255.0
     res = np.array(result).astype(float) / 255.0
-    h, w = img.size[1], img.size[0]
     # 边缘区域的局部方差应降低（模糊了）
     def local_var(arr, y, x, sz=20):
         return arr[y:y+sz, x:x+sz, :].var()

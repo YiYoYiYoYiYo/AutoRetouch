@@ -70,10 +70,16 @@ class VLMBridge:
         ]
 
         gp = suggestion.global_params
+        extra = []
+        if gp.vignette > 0:
+            extra.append(f"vignette={gp.vignette:.2f}")
+        if gp.blur > 0:
+            extra.append(f"blur={gp.blur:.2f}")
         logger.info(
-            "[bridge] %s 全局参数: EV=%+.2f WB=%dK contrast=%+d highlights=%+d shadows=%+d sat=%+d",
+            "[bridge] %s 全局: EV=%+.2f WB=%dK contrast=%+d highlights=%+d shadows=%+d sat=%+d%s",
             name, gp.exposure_ev, gp.white_balance_k, gp.contrast,
             gp.highlights, gp.shadows, gp.saturation,
+            f" {' '.join(extra)}" if extra else "",
         )
         for i, la in enumerate(suggestion.local_adjustments):
             logger.info(

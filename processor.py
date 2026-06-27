@@ -83,6 +83,17 @@ class ImageProcessor:
             img = self._apply_saturation(img, gp.saturation)
             steps.append(f"sat={gp.saturation:+d}")
 
+        # 暗角（全图效果，不走 mask 分割）
+        if gp.vignette > 0:
+            img = self._apply_vignette(img, 0.5, 0.5, gp.vignette)
+            steps.append(f"vignette={gp.vignette:.2f}")
+
+        # 镜头模糊（全图效果，以画面中心为焦点）
+        if gp.blur > 0:
+            radius = max(1, int(gp.blur * 30))
+            img = self._apply_lens_blur(img, 0.5, 0.5, radius)
+            steps.append(f"blur={gp.blur:.2f}(r={radius})")
+
         logger.info("[processor] 全局: %s", " | ".join(steps) if steps else "无调整（跳过）")
         return np.clip(img, 0, 1)
 
@@ -219,18 +230,6 @@ class ImageProcessor:
             adjusted[:, :, 2] = np.clip(adjusted[:, :, 2] + shift, 0, 1)
             logger.info("[processor] 局部 '%s' type=%s temp_shift=%d 覆盖=%.1f%% → R−=%.3f B+=%.3f",
                         adj.description, t, adj.temperature_shift, coverage * 100, shift * 0.7, shift)
-
-        # ── 效果型 ──
-        elif t == "vignette":
-            strength = abs(adj.exposure_ev) if adj.exposure_ev != 0 else 0.5
-            adjusted = ImageProcessor._apply_vignette(adjusted, adj.x, adj.y, strength)
-            logger.info("[processor] 局部 '%s' type=vignette str=%.2f xy=(%.2f,%.2f)",
-                        adj.description, strength, adj.x, adj.y)
-        elif t == "blur":
-            radius = max(1, int(abs(adj.exposure_ev) * 20)) if adj.exposure_ev != 0 else 15
-            adjusted = ImageProcessor._apply_lens_blur(adjusted, adj.x, adj.y, radius)
-            logger.info("[processor] 局部 '%s' type=blur radius=%d xy=(%.2f,%.2f)",
-                        adj.description, radius, adj.x, adj.y)
 
         else:
             logger.warning("[processor] 局部 '%s' 未知 type='%s'，跳过（mask 区域无变化）", adj.description, t)

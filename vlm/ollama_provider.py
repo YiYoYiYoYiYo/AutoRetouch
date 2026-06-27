@@ -17,8 +17,8 @@ _PROMPT = """你是专业修图师。分析这张照片，输出JSON修图建议
 contrast/highlights/shadows/saturation:-100到+100(int), 坐标0-1(float)。
 
 输出格式：
-{{"analysis":"分析","style":"风格","global":{{"exposure_ev":0.0,"white_balance_k":5500,"contrast":0,"highlights":0,"shadows":0,"saturation":0}},"local":[{{"description":"区域","x":0.5,"y":0.5,"type":"类型","exposure_ev":0.5,"temperature_shift":200,"reason":"理由"}}]}}
-type 规则：brighten/darken/shadows/highlights(曝光型,看exposure_ev); warm/warmth/cool/cooling(色温型,看temperature_shift,暖正冷负,仅用于小区域<15%,大面积暖色请用全局white_balance_k); vignette(暗角,exposure_ev控制强度0.3~1.0); blur(背景模糊,exposure_ev控制模糊程度0.3~1.0)。只输出JSON。"""
+{{"analysis":"分析","style":"风格","global":{{"exposure_ev":0.0,"white_balance_k":5500,"contrast":0,"highlights":0,"shadows":0,"saturation":0,"vignette":0.0,"blur":0.0}},"local":[{{"description":"区域","x":0.5,"y":0.5,"type":"类型","exposure_ev":0.5,"temperature_shift":200,"reason":"理由"}}]}}
+全局效果：vignette(暗角0~1,越大越明显); blur(镜头模糊0~1,以画面中心为焦点)。局部type：brighten/darken/shadows/highlights(曝光型,看exposure_ev); warm/warmth/cool/cooling(色温型,看temperature_shift,暖正冷负,仅用于小区域<15%,大面积暖色请用全局white_balance_k)。只输出JSON。"""
 
 
 class OllamaProvider(VLMProvider):

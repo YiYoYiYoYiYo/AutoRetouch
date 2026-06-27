@@ -17,6 +17,8 @@ class GlobalParams:
     highlights: int = 0            # -100 ~ +100
     shadows: int = 0               # -100 ~ +100
     saturation: int = 0            # -100 ~ +100
+    vignette: float = 0.0          # 暗角强度 0.0~1.0（0=无）
+    blur: float = 0.0              # 镜头模糊强度 0.0~1.0（0=无，以画面中心为焦点）
 
     def clamp(self, spec) -> "GlobalParams":
         """将参数限制在规范范围内，并强制类型（int 字段转 int、exposure 转 float）
@@ -31,6 +33,8 @@ class GlobalParams:
             highlights=int(max(spec.adjust_min, min(spec.adjust_max, self.highlights))),
             shadows=int(max(spec.adjust_min, min(spec.adjust_max, self.shadows))),
             saturation=int(max(spec.adjust_min, min(spec.adjust_max, self.saturation))),
+            vignette=float(max(0.0, min(1.0, self.vignette))),
+            blur=float(max(0.0, min(1.0, self.blur))),
         )
 
 
@@ -40,7 +44,7 @@ class LocalAdjustment:
     description: str = ""          # 区域描述，如"前景草丛"
     x: float = 0.5                 # 相对坐标 0-1
     y: float = 0.5                 # 相对坐标 0-1
-    adjustment_type: str = "brighten"  # brighten/darken/warm/warmth/cool/cooling/shadows/highlights/vignette/blur
+    adjustment_type: str = "brighten"  # brighten/darken/warm/warmth/cool/cooling/shadows/highlights
     exposure_ev: float = 0.0       # 局部曝光调整
     temperature_shift: int = 0     # 局部色温偏移（仅 warm/cool 类生效）
     reason: str = ""               # 调整理由
