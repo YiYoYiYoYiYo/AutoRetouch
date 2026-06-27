@@ -80,56 +80,19 @@ def format_suggestion_json(s: EditSuggestion) -> str:
 
 
 def build_slider_html(original_b64: str, processed_b64: str) -> str:
-    """构建滑动对比 HTML"""
+    """构建滑动对比 HTML（纯 HTML，JS 在 Blocks 级别注入）"""
     return f"""
     <div id="slider-container" style="position:relative;width:100%;max-width:900px;overflow:hidden;border-radius:8px;cursor:col-resize;user-select:none;">
-        <img src="{processed_b64}" style="width:100%;display:block;" />
+        <img src="{processed_b64}" style="width:100%;display:block;" id="slider-proc-img" />
         <div id="slider-clip" style="position:absolute;top:0;left:0;width:50%;height:100%;overflow:hidden;">
-            <img src="{original_b64}" style="width:900px;max-width:none;display:block;" />
+            <img src="{original_b64}" id="slider-orig-img" style="width:900px;max-width:none;display:block;" />
         </div>
-        <div id="slider-handle" style="position:absolute;top:0;left:50%;width:3px;height:100%;background:#fff;box-shadow:0 0 8px rgba(0,0,0,0.5);transform:translateX(-50%);pointer-events:none;">
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.7);color:#fff;padding:6px 10px;border-radius:20px;font-size:12px;white-space:nowrap;pointer-events:none;">
+        <div id="slider-handle" style="position:absolute;top:0;left:50%;width:4px;height:100%;background:#fff;box-shadow:0 0 8px rgba(0,0,0,0.5);transform:translateX(-50%);pointer-events:none;">
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.7);color:#fff;padding:6px 12px;border-radius:20px;font-size:13px;white-space:nowrap;pointer-events:none;">
                 ◀ 原图 | 处理后 ▶
             </div>
         </div>
     </div>
-    <script>
-    (function() {{
-        const container = document.getElementById('slider-container');
-        const clip = document.getElementById('slider-clip');
-        const handle = document.getElementById('slider-handle');
-        const clipImg = clip.querySelector('img');
-        if (!container || !clip || !handle) return;
-
-        function setPosition(clientX) {{
-            const rect = container.getBoundingClientRect();
-            let pct = ((clientX - rect.left) / rect.width) * 100;
-            pct = Math.max(0, Math.min(100, pct));
-            clip.style.width = pct + '%';
-            handle.style.left = pct + '%';
-            // clip 内的图片宽度 = 容器实际宽度
-            clipImg.style.width = rect.width + 'px';
-        }}
-
-        // 初始化：图片加载后设置 clip 图片宽度
-        const mainImg = container.querySelector(':scope > img');
-        if (mainImg.complete) {{
-            clipImg.style.width = container.offsetWidth + 'px';
-        }} else {{
-            mainImg.onload = () => {{ clipImg.style.width = container.offsetWidth + 'px'; }};
-        }}
-
-        let dragging = false;
-        container.addEventListener('mousedown', (e) => {{ dragging = true; setPosition(e.clientX); }});
-        document.addEventListener('mousemove', (e) => {{ if (dragging) setPosition(e.clientX); }});
-        document.addEventListener('mouseup', () => {{ dragging = false; }});
-        container.addEventListener('touchstart', (e) => {{ dragging = true; setPosition(e.touches[0].clientX); }});
-        container.addEventListener('touchmove', (e) => {{ if (dragging) {{ e.preventDefault(); setPosition(e.touches[0].clientX); }} }});
-        container.addEventListener('touchend', () => {{ dragging = false; }});
-
-        window.addEventListener('resize', () => {{ clipImg.style.width = container.offsetWidth + 'px'; }});
-    }})();
-    </script>
     """
 
 
@@ -315,8 +278,56 @@ def process_and_export(files, context, backend, output_format):
 
 # ── 构建界面 ──────────────────────────────────────
 
+SLIDER_JS = """
+function() {
+    function initSlider() {
+        var container = document.getElementById('slider-container');
+        var clip = document.getElementById('slider-clip');
+        var handle = document.getElementById('slider-handle');
+        var clipImg = document.getElementById('slider-orig-img');
+        if (!container || !clip || !handle || !clipImg) return;
+
+        function setPosition(clientX) {
+            var rect = container.getBoundingClientRect();
+            var pct = ((clientX - rect.left) / rect.width) * 100;
+            pct = Math.max(0, Math.min(100, pct));
+            clip.style.width = pct + '%';
+            handle.style.left = pct + '%';
+            clipImg.style.width = rect.width + 'px';
+        }
+
+        var mainImg = document.getElementById('slider-proc-img');
+        if (mainImg) {
+            if (mainImg.complete) { clipImg.style.width = container.offsetWidth + 'px'; }
+            else { mainImg.onload = function() { clipImg.style.width = container.offsetWidth + 'px'; }; }
+        }
+
+        var dragging = false;
+        container.onmousedown = function(e) { dragging = true; setPosition(e.clientX); e.preventDefault(); };
+        document.onmousemove = function(e) { if (dragging) setPosition(e.clientX); };
+        document.onmouseup = function() { dragging = false; };
+        container.ontouchstart = function(e) { dragging = true; setPosition(e.touches[0].clientX); e.preventDefault(); };
+        container.ontouchmove = function(e) { if (dragging) { setPosition(e.touches[0].clientX); e.preventDefault(); } };
+        container.ontouchend = function() { dragging = false; };
+        window.addEventListener('resize', function() { clipImg.style.width = container.offsetWidth + 'px'; });
+    }
+
+    // Watch for slider container to appear
+    var observer = new MutationObserver(function(mutations) {
+        if (document.getElementById('slider-container')) {
+            initSlider();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Also try on load
+    if (document.readyState === 'complete') { initSlider(); }
+    else { window.addEventListener('load', initSlider); }
+}
+"""
+
 def build_app() -> gr.Blocks:
-    with gr.Blocks(title="AI Beautify", css=CUSTOM_CSS) as app:
+    with gr.Blocks(title="AI Beautify", css=CUSTOM_CSS, js=SLIDER_JS) as app:
         gr.Markdown("# 🎨 AI Beautify\n全自动 AI 修图与调色工作流")
 
         with gr.Row():
