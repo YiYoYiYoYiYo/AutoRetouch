@@ -258,20 +258,20 @@ class ImageProcessor:
     def _apply_vignette(
         img: np.ndarray, cx: float, cy: float, strength: float,
     ) -> np.ndarray:
-        """暗角效果：以 (cx,cy) 为中心径向暗化边缘
+        """暗角效果：仅在图片边缘区域暗化，中心保持不变
 
         strength: 0~1，越大暗角越明显
         """
         h, w = img.shape[:2]
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-        # 归一化到 [-1, 1]，中心为 (cx, cy)
         nx = (xx / w - cx) * 2.0
         ny = (yy / h - cy) * 2.0
         dist = np.sqrt(nx ** 2 + ny ** 2)
-        # 暗角权重：距离中心越远越暗，smoothstep 过渡
-        vignette = 1.0 - np.clip((dist - 0.5) * 2.0, 0, 1) ** 2 * strength
+        # 仅外圈 30% 有暗角：dist < 0.7 完全不变，0.7~1.0 平滑过渡
+        t = np.clip((dist - 0.7) / 0.3, 0, 1)
+        darken = strength * t * t * (3.0 - 2.0 * t)  # smoothstep
         for c in range(3):
-            img[:, :, c] *= vignette
+            img[:, :, c] *= (1.0 - darken)
         return np.clip(img, 0, 1)
 
     @staticmethod
