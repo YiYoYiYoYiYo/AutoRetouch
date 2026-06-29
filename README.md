@@ -6,6 +6,14 @@
 
 AI-powered photo retouching workflow — batch upload, auto-analyze with VLM, generate professional editing parameters, and export in one click.
 
+## 📸 Preview
+
+| Original | Processed |
+|----------|-----------|
+| ![Original](test_image.jpg) | ![Processed](test_image_edited.jpeg) |
+
+![Before vs After](前后对比.gif)
+
 ## ✨ Features
 
 - **AI Analysis** — VLM vision models identify scenes, determine style, and generate professional retouching parameters

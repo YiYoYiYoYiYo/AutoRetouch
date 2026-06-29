@@ -9,15 +9,19 @@ env/
 dist/
 build/
 .pytest_cache/
-*.jpg
-*.jpeg
-*.png
 *.heic
 *.raw
 *.cr2
 *.nef
 *.arw
 *.dng
+# 忽略图片但保留 README 素材
+*.jpg
+*.jpeg
+*.png
+!test_image.jpg
+!test_image_edited.jpeg
+!前后对比.gif
 logs/
 output/
 .env
