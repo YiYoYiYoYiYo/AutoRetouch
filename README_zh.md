@@ -8,7 +8,7 @@
 
 | 原图 | 处理后 |
 |------|--------|
-| ![原图](test_image.jpg) | ![处理后](test_image_edited.jpeg) |
+| ![原图](test_image.jpg) | ![处理后](test_image_edited_v2.jpeg) |
 
 ![前后对比](前后对比.gif)
 

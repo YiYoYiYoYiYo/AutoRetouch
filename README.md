@@ -10,7 +10,7 @@ AI-powered photo retouching workflow — batch upload, auto-analyze with VLM, ge
 
 | Original | Processed |
 |----------|-----------|
-| ![Original](test_image.jpg) | ![Processed](test_image_edited.jpeg) |
+| ![Original](test_image.jpg) | ![Processed](test_image_edited_v2.jpeg) |
 
 ![Before vs After](前后对比.gif)
 
