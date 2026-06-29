@@ -183,16 +183,16 @@ def analyze_images(files, context, backend):
 
     if not files:
         log("❌ 请先上传照片")
-        yield "请上传照片", "", make_log_html(logs), empty_slider, '<div class="status-error">❌ 请先上传照片</div>'
+        yield "请上传照片", "", make_log_html(logs), empty_slider, '<div class="status-error">❌ 请先上传照片</div>', None
         return
 
     log(f"📷 加载 {len(files)} 张图片...")
-    yield "⏳ 加载中...", "", make_log_html(logs), empty_slider, '<div class="status-loading">⏳ 加载图片...</div>'
+    yield "⏳ 加载中...", "", make_log_html(logs), empty_slider, '<div class="status-loading">⏳ 加载图片...</div>', None
 
     images = load_images([f.name for f in files])
     if not images:
         log("❌ 图片加载失败")
-        yield "图片加载失败", "", make_log_html(logs), empty_slider, '<div class="status-error">❌ 图片加载失败</div>'
+        yield "图片加载失败", "", make_log_html(logs), empty_slider, '<div class="status-error">❌ 图片加载失败</div>', None
         return
 
     log(f"✅ 加载完成 ({len(images)} 张)")
@@ -200,7 +200,7 @@ def analyze_images(files, context, backend):
 
     for i, (name, img) in enumerate(images):
         log(f"🧠 分析 [{i+1}/{len(images)}]: {Path(name).name}")
-        yield "⏳ 分析中...", "", make_log_html(logs), empty_slider, f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]...</div>'
+        yield "⏳ 分析中...", "", make_log_html(logs), empty_slider, f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]...</div>', None
 
         try:
             suggestion = pipeline._bridge.analyze(img, context, None if backend in ("自动", "") else backend)
@@ -224,11 +224,12 @@ def analyze_images(files, context, backend):
         make_log_html(logs),
         preview_html,
         f'<div class="status-done">✅ 分析完成 {len(images)} 张，耗时 {total_time:.1f}s</div>',
+        (images, suggestions),  # 写入 state
     )
 
 
-def process_and_export(files, context, backend, output_format):
-    """逐张处理，实时 yield 进度"""
+def process_and_export(files, context, backend, output_format, cached=None):
+    """逐张处理，实时 yield 进度。优先复用已有的分析结果"""
     logs = []
     t0 = time.time()
 
@@ -244,42 +245,67 @@ def process_and_export(files, context, backend, output_format):
             '<div class="status-error">❌ 请先上传照片</div>', make_log_html(logs), None
         return
 
-    log(f"📷 加载 {len(files)} 张图片...")
-    yield [], "⏳ 加载中...", empty_slider, \
-        '<div class="status-loading">⏳ 加载图片...</div>', make_log_html(logs), None
+    # 复用已有分析结果，或重新加载+分析
+    if cached and isinstance(cached, tuple) and len(cached) == 2:
+        images, suggestions = cached
+        if images and suggestions and len(images) == len(suggestions):
+            log(f"♻️ 复用已有分析结果 ({len(images)} 张)")
+        else:
+            cached = None  # 数据不匹配，重新分析
 
-    images = load_images([f.name for f in files])
-    if not images:
-        log("❌ 图片加载失败")
-        yield [], "图片加载失败", empty_slider, \
-            '<div class="status-error">❌ 图片加载失败</div>', make_log_html(logs), None
-        return
-    log(f"✅ 加载完成 ({len(images)} 张)")
+    if not cached:
+        log(f"📷 加载 {len(files)} 张图片...")
+        yield [], "⏳ 加载中...", empty_slider, \
+            '<div class="status-loading">⏳ 加载图片...</div>', make_log_html(logs), None
 
-    # 逐张：VLM 分析 → 图像处理 → 导出
-    results = []
+        images = load_images([f.name for f in files])
+        if not images:
+            log("❌ 图片加载失败")
+            yield [], "图片加载失败", empty_slider, \
+                '<div class="status-error">❌ 图片加载失败</div>', make_log_html(logs), None
+            return
+        log(f"✅ 加载完成 ({len(images)} 张)")
+
+        suggestions = []
+        for i, (name, img) in enumerate(images):
+            log(f"🧠 分析 [{i+1}/{len(images)}]: {Path(name).name}")
+            yield [], "⏳ 分析中...", empty_slider, \
+                f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]: {Path(name).name}</div>', make_log_html(logs), None
+            try:
+                suggestion = pipeline._bridge.analyze(img, context, None if backend in ("自动", "") else backend)
+                _auto_effects(suggestion)
+                suggestions.append(suggestion)
+            except Exception as e:
+                log(f"  ❌ 分析失败: {e}")
+                suggestions.append(EditSuggestion(analysis=f"分析失败: {e}", backend="error"))
+
+    # 逐张处理 + 导出
     export_paths = []
     output_dir = Path(tempfile.mkdtemp(prefix="ai_beautify_"))
     first_slider = None
 
     for i, (name, img) in enumerate(images):
-        # VLM 分析
-        log(f"🧠 分析 [{i+1}/{len(images)}]: {Path(name).name}")
+        suggestion = suggestions[i]
+        if suggestion.backend == "error":
+            log(f"  ⏭️ 跳过 [{i+1}]: 分析失败")
+            continue
+
+        gp = suggestion.global_params
+        log(f"  → [{i+1}] 后端: {suggestion.backend} | EV={gp.exposure_ev:+.2f} WB={gp.white_balance_k}K "
+            f"contrast={gp.contrast:+d} sat={gp.saturation:+d} vignette={gp.vignette:.2f} blur={gp.blur:.2f} "
+            f"局部={len(suggestion.local_adjustments)}个")
+
+        # 图像处理
+        log(f"🎨 处理 [{i+1}/{len(images)}]: {Path(name).name}")
         yield [], "⏳ 处理中...", empty_slider if first_slider is None else first_slider, \
-            f'<div class="status-loading">⏳ 分析 [{i+1}/{len(images)}]: {Path(name).name}</div>', make_log_html(logs), None
+            f'<div class="status-loading">⏳ 处理 [{i+1}/{len(images)}]: {Path(name).name}</div>', make_log_html(logs), None
 
         try:
-            suggestion = pipeline._bridge.analyze(img, context, None if backend in ("自动", "") else backend)
-            # 自动检测：VLM 分析文本中提到背景/虚化/聚焦时自动加 blur/vignette
-            _auto_effects(suggestion)
-            gp = suggestion.global_params
-            log(f"  → 后端: {suggestion.backend} | EV={gp.exposure_ev:+.2f} WB={gp.white_balance_k}K "
-                f"contrast={gp.contrast:+d} highlights={gp.highlights:+d} shadows={gp.shadows:+d} "
-                f"sat={gp.saturation:+d} vignette={gp.vignette:.2f} blur={gp.blur:.2f} "
-                f"局部={len(suggestion.local_adjustments)}个")
+            processed = pipeline._processor.process(img, suggestion)
+            log(f"  ✅ 处理完成")
         except Exception as e:
-            log(f"  ❌ 分析失败: {e}")
-            suggestion = EditSuggestion(analysis=f"分析失败: {e}", backend="error")
+            log(f"  ❌ 处理失败: {e}")
+            processed = img
 
         # 图像处理
         log(f"🎨 处理 [{i+1}/{len(images)}]: {Path(name).name}")
@@ -388,17 +414,20 @@ def build_app() -> gr.Blocks:
         # ── 日志面板（底部）──
         log_display = gr.HTML(value=make_log_html([]))
 
+        # ── 状态存储 ──
+        analysis_cache = gr.State(None)  # 存储 (images, suggestions)
+
         # ── 事件绑定 ──
 
         analyze_btn.click(
             fn=analyze_images,
             inputs=[files, context, backend],
-            outputs=[suggestion_display, json_display, log_display, slider_display, status],
+            outputs=[suggestion_display, json_display, log_display, slider_display, status, analysis_cache],
         )
 
         process_btn.click(
             fn=process_and_export,
-            inputs=[files, context, backend, output_format],
+            inputs=[files, context, backend, output_format, analysis_cache],
             outputs=[output_gallery, export_summary, slider_display, status, log_display, zip_file],
         )
 
@@ -406,18 +435,12 @@ def build_app() -> gr.Blocks:
 
 
 def main():
-    import socket
+    import os
 
-    def find_free_port(start=7860, end=7870):
-        for port in range(start, end):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                if s.connect_ex(("127.0.0.1", port)) != 0:
-                    return port
-        return start
-
-    port = find_free_port()
+    host = os.environ.get("SERVER_HOST", "127.0.0.1")
+    port = int(os.environ.get("SERVER_PORT", "7860"))
     app = build_app()
-    app.launch(server_name="0.0.0.0", server_port=port, share=False)
+    app.launch(server_name=host, server_port=port, share=False)
 
 
 if __name__ == "__main__":

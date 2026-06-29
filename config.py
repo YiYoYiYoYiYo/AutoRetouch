@@ -1,13 +1,18 @@
 """全局配置"""
 
+import os
 from dataclasses import dataclass, field
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 @dataclass
 class GLMConfig:
     """GLM-4.1V-Thinking-Flash 配置"""
-    api_key: str = "0df3aede210a403e8a6ae5866f60dcab.URnNJpdXUxeYMOpW"
-    base_url: str = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    api_key: str = field(default_factory=lambda: os.environ.get("GLM_API_KEY", ""))
+    base_url: str = field(default_factory=lambda: os.environ.get("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions"))
     model: str = "glm-4.1v-thinking-flash"
     max_tokens: int = 2048
     temperature: float = 0.3
@@ -17,8 +22,8 @@ class GLMConfig:
 @dataclass
 class AgnesConfig:
     """agnes-2.0-flash 配置"""
-    api_key: str = "sk-bCJKsioXvFlKHwyxTlUSsJcOn4uIOqL1K81dRZHJYdA3ClfO"
-    base_url: str = "https://apihub.agnes-ai.com/v1/chat/completions"
+    api_key: str = field(default_factory=lambda: os.environ.get("AGNES_API_KEY", ""))
+    base_url: str = field(default_factory=lambda: os.environ.get("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1/chat/completions"))
     model: str = "agnes-2.0-flash"
     max_tokens: int = 2048
     temperature: float = 0.3
@@ -27,7 +32,7 @@ class AgnesConfig:
 @dataclass
 class OllamaConfig:
     """Ollama 本地模型配置"""
-    base_url: str = "http://localhost:11434/api/chat"
+    base_url: str = field(default_factory=lambda: os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/api/chat"))
     model: str = "qwen2.5vl:3b"
 
 
@@ -71,7 +76,7 @@ class AppConfig:
     param_spec: ParamSpec = field(default_factory=ParamSpec)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
-    default_backend: str = "glm"  # glm / agnes / ollama
+    default_backend: str = field(default_factory=lambda: os.environ.get("DEFAULT_BACKEND", "glm"))  # glm / agnes / ollama
     max_concurrent: int = 5  # 最大并发数
 
 

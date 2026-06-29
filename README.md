@@ -1,4 +1,6 @@
-# 🎨 AI Beautify
+# 🎨 AutoRetouch
+
+> 不做像素的篡改者，只做光影的引路人 — 每一张照片，都值得保留它最初的灵魂
 
 全自动 AI 修图与调色工作流——批量上传照片，AI 自动分析并生成专业修图建议，一键批量出片。
 
@@ -17,11 +19,24 @@
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 启动应用
+# 2. 配置 API Key
+cp .env.example .env
+# 编辑 .env，填入你的 API Key
+
+# 3. 启动应用
 python app.py
 
-# 3. 浏览器打开 http://localhost:7860
+# 4. 浏览器打开 http://localhost:7860
 ```
+
+### 环境变量
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `GLM_API_KEY` | ✅ | GLM 服务密钥，[申请地址](https://open.bigmodel.cn/) |
+| `AGNES_API_KEY` | ✅ | Agnes 服务密钥 |
+| `SERVER_HOST` | ❌ | 服务器绑定地址，默认 `127.0.0.1` |
+| `SERVER_PORT` | ❌ | 服务器端口，默认 `7860` |
 
 ## 📸 使用流程
 
