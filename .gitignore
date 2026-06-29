@@ -20,7 +20,7 @@ build/
 *.jpeg
 *.png
 !test_image.jpg
-!test_image_edited.jpeg
+!test_image_edited_v2.jpeg
 !前后对比.gif
 logs/
 output/
