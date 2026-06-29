@@ -1,99 +1,101 @@
 # 🎨 AutoRetouch
 
-> 不做像素的篡改者，只做光影的引路人 — 每一张照片，都值得保留它最初的灵魂
+> Not a pixel fabricator, but a light guide — every photo deserves to keep its original soul
 
-全自动 AI 修图与调色工作流——批量上传照片，AI 自动分析并生成专业修图建议，一键批量出片。
+[中文](./README_zh.md)
 
-## ✨ 功能特性
+AI-powered photo retouching workflow — batch upload, auto-analyze with VLM, generate professional editing parameters, and export in one click.
 
-- **AI 智能分析** — VLM 视觉大模型识别场景、判断风格、生成专业修图参数
-- **局部调整** — 自动分割图像区域，对指定区域进行独立调亮/调暗/调色
-- **批量处理** — 批量上传、批量分析、批量导出，一键完成
-- **多后端切换** — 云端 GLM（高质量）/ agnes（快速）/ 本地 Ollama（离线隐私）
-- **RAW 支持** — 支持 CR2/NEF/ARW/DNG 等 RAW 格式自动转 JPEG
-- **多格式导出** — JPEG / HEIC 输出
+## ✨ Features
 
-## 🚀 快速开始
+- **AI Analysis** — VLM vision models identify scenes, determine style, and generate professional retouching parameters
+- **Local Adjustments** — Auto-segment image regions for independent brighten/darken/color grading
+- **Batch Processing** — Batch upload, batch analyze, batch export — one click
+- **Multi-Backend** — Cloud GLM (high quality) / Agnes (fast) / Local Ollama (offline & private)
+- **RAW Support** — CR2/NEF/ARW/DNG auto-converted to JPEG
+- **Multi-Format Export** — JPEG / HEIC
+
+## 🚀 Quick Start
 
 ```bash
-# 1. 安装依赖
+# 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. 配置 API Key
+# 2. Configure API keys
 cp .env.example .env
-# 编辑 .env，填入你的 API Key
+# Edit .env and fill in your API keys
 
-# 3. 启动应用
+# 3. Launch
 python app.py
 
-# 4. 浏览器打开 http://localhost:7860
+# 4. Open http://localhost:7860
 ```
 
-### 环境变量
+### Environment Variables
 
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `GLM_API_KEY` | ✅ | GLM 服务密钥，[申请地址](https://open.bigmodel.cn/) |
-| `AGNES_API_KEY` | ✅ | Agnes 服务密钥 |
-| `SERVER_HOST` | ❌ | 服务器绑定地址，默认 `127.0.0.1` |
-| `SERVER_PORT` | ❌ | 服务器端口，默认 `7860` |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GLM_API_KEY` | ✅ | GLM API key, [get it here](https://open.bigmodel.cn/) |
+| `AGNES_API_KEY` | ✅ | Agnes API key |
+| `SERVER_HOST` | ❌ | Server bind address, default `127.0.0.1` |
+| `SERVER_PORT` | ❌ | Server port, default `7860` |
 
-## 📸 使用流程
-
-```
-上传照片 → 描述场景 → AI 分析 → 确认建议 → 批量导出
-```
-
-1. **上传照片** — 支持 JPEG/PNG/RAW，可批量上传
-2. **填写场景描述** — 如"苏州园林旅行照，阴天拍摄"
-3. **选择 VLM 后端** — 留空自动降级（推荐）
-4. **点击"分析"** — AI 给出逐张修图建议
-5. **确认后点击"处理并导出"** — 批量出片
-
-## 🧠 VLM 后端
-
-| 后端 | 模型 | 速度 | 质量 | 要求 |
-|------|------|------|------|------|
-| `glm` | GLM-4.1V-Thinking-Flash | ~11秒/张 | ⭐⭐⭐ | 网络 + API Key |
-| `agnes` | agnes-2.0-flash | ~5秒/张 | ⭐⭐ | 网络 + API Key |
-| `ollama` | qwen2.5vl:3b | ~3分钟/张 | ⭐ | 本地 Ollama |
-
-**自动降级：** glm → agnes → ollama
-
-**隐私模式：** 敏感照片手动选择 `ollama`，数据不出本机。
-
-## ⚙️ 参数规范
-
-| 参数 | 范围 | 说明 |
-|------|------|------|
-| `exposure_ev` | -3.0 ~ +3.0 | 曝光值（EV） |
-| `white_balance_k` | 2000 ~ 10000 | 色温（K） |
-| `contrast` | -100 ~ +100 | 对比度 |
-| `highlights` | -100 ~ +100 | 高光 |
-| `shadows` | -100 ~ +100 | 阴影 |
-| `saturation` | -100 ~ +100 | 饱和度 |
-
-## 🏗️ 项目结构
+## 📸 Workflow
 
 ```
-AI Beautify/
-├── app.py                  # Gradio 用户界面
-├── config.py               # 全局配置
-├── pipeline.py             # 批量处理管线
-├── processor.py            # 图像处理引擎
-├── vlm/                    # VLM 桥接层
-│   ├── base.py             # 数据模型
-│   ├── glm_provider.py     # GLM 云端
-│   ├── agnes_provider.py   # agnes 云端
-│   ├── ollama_provider.py  # Ollama 本地
-│   └── bridge.py           # 统一调度
-├── segmentation/           # 图像分割
+Upload → Describe Scene → AI Analyze → Review Suggestions → Export
+```
+
+1. **Upload** — JPEG/PNG/RAW, batch supported
+2. **Describe** — e.g. "Travel photos from a garden, overcast weather"
+3. **Choose Backend** — leave blank for auto-fallback (recommended)
+4. **Click "Analyze"** — AI generates per-photo retouching suggestions
+5. **Review & Click "Process & Export"** — batch output
+
+## 🧠 VLM Backends
+
+| Backend | Model | Speed | Quality | Requirement |
+|---------|-------|-------|---------|-------------|
+| `glm` | GLM-4.1V-Thinking-Flash | ~11s/photo | ⭐⭐⭐ | Network + API Key |
+| `agnes` | Agnes-2.0-flash | ~5s/photo | ⭐⭐ | Network + API Key |
+| `ollama` | qwen2.5vl:3b | ~3min/photo | ⭐ | Local Ollama |
+
+**Auto-fallback:** glm → agnes → ollama
+
+**Privacy mode:** select `ollama` manually — your photos never leave your machine.
+
+## ⚙️ Parameter Specs
+
+| Parameter | Range | Description |
+|-----------|-------|-------------|
+| `exposure_ev` | -3.0 ~ +3.0 | Exposure value (EV) |
+| `white_balance_k` | 2000 ~ 10000 | White balance (K) |
+| `contrast` | -100 ~ +100 | Contrast |
+| `highlights` | -100 ~ +100 | Highlights |
+| `shadows` | -100 ~ +100 | Shadows |
+| `saturation` | -100 ~ +100 | Saturation |
+
+## 🏗️ Project Structure
+
+```
+AutoRetouch/
+├── app.py                  # Gradio UI
+├── config.py               # Global config
+├── pipeline.py             # Batch processing pipeline
+├── processor.py            # Image processing engine
+├── vlm/                    # VLM bridge layer
+│   ├── base.py             # Data models
+│   ├── glm_provider.py     # GLM cloud
+│   ├── agnes_provider.py   # Agnes cloud
+│   ├── ollama_provider.py  # Ollama local
+│   └── bridge.py           # Unified dispatcher
+├── segmentation/           # Image segmentation
 │   └── segmenter.py        # GrabCut / GroundingDINO
-├── tests/                  # 测试
-└── docs/                   # 文档
+├── tests/                  # Tests
+└── docs/                   # Documentation
 ```
 
-## 🔧 命令行使用
+## 🔧 CLI Usage
 
 ```python
 from pipeline import BatchPipeline, load_images
@@ -102,17 +104,17 @@ from pathlib import Path
 images = load_images(["photo1.jpg", "photo2.jpg"])
 pipe = BatchPipeline()
 
-suggestions = pipe.analyze_batch(images, context="旅行风景照")
+suggestions = pipe.analyze_batch(images, context="Travel landscape photos")
 batch = pipe.process_batch(images, suggestions)
 paths = pipe.export_batch(batch, Path("output"))
 ```
 
-## 📋 依赖
+## 📋 Dependencies
 
-**核心：** Python 3.10+, Gradio, Pillow, NumPy, OpenCV, Requests
+**Core:** Python 3.10+, Gradio, Pillow, NumPy, OpenCV, Requests
 
-**可选：** rawpy (RAW 支持), pillow-heif (HEIC 导出), PyTorch + Transformers (GroundingDINO 分割)
+**Optional:** rawpy (RAW support), pillow-heif (HEIC export), PyTorch + Transformers (GroundingDINO segmentation)
 
-## 📄 许可证
+## 📄 License
 
 MIT
